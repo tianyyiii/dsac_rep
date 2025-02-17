@@ -127,21 +127,28 @@ class DiffRep(Algorithm):
             q2_params = optax.apply_updates(q2_params, q2_update)
 
 
-            def policy_loss_fn(policy_params) -> jax.Array:
+            def policy_loss_fn(policy_params, mu_params) -> jax.Array:
                 q_min = get_min_q(next_obs, next_action)
                 q_mean, q_std = q_min.mean(), q_min.std()
                 norm_q = q_min - running_mean / running_std
                 scaled_q = norm_q.clip(-3., 3.) / jnp.exp(log_alpha)
                 q_weights = jnp.exp(scaled_q)
                 def denoiser(t, x):
-                    return self.agent.policy(policy_params, next_obs, x, t)
+                    return self.agent.policy(policy_params, next_obs, x, t)[1]
                 t = jax.random.randint(diffusion_time_key, (next_obs.shape[0],), 0, self.agent.num_timesteps)
-                loss = self.agent.diffusion.weighted_p_loss(diffusion_noise_key, q_weights, denoiser, t,
+                noise, x_noisy, loss = self.agent.diffusion.weighted_p_loss(diffusion_noise_key, q_weights, denoiser, t,
                                                             jax.lax.stop_gradient(next_action))
+                
+                phi_output = self.agent.policy(policy_params, obs, x_noisy, t)[0]
+                mu_output = self.agent.mu(mu_params, next_obs)
+                mul = jnp.matmul(phi_output, mu_output[..., None])
+                mul = mul.squeeze(-1)
+                rep_loss = optax.squared_error(mul, noise).mean()
+                loss = loss + rep_loss
 
                 return loss, (q_weights, scaled_q, q_mean, q_std)
 
-            (total_loss, (q_weights, scaled_q, q_mean, q_std)), policy_grads = jax.value_and_grad(policy_loss_fn, has_aux=True)(policy_params)
+            (total_loss, (q_weights, scaled_q, q_mean, q_std)), policy_grads = jax.value_and_grad(policy_loss_fn, has_aux=True)(policy_params, mu_params)
 
             # update alpha
             def log_alpha_loss_fn(log_alpha: jax.Array) -> jax.Array:

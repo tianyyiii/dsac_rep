@@ -41,7 +41,7 @@ class DiffRepNet:
         policy_params, log_alpha, q1_params, q2_params = policy_params
 
         def model_fn(t, x):
-            return self.policy(policy_params, obs, x, t)
+            return self.policy(policy_params, obs, x, t)[1]
 
         def sample(key: jax.Array) -> Union[jax.Array, jax.Array]:
             act = self.diffusion.p_sample(key, model_fn, (*obs.shape[:-1], self.act_dim))
