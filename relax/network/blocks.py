@@ -208,9 +208,8 @@ class DiffusionRepPolicyNet(hk.Module):
     embedding_dim: int = 256
     time_dim: int = 16
     name: str = None
-
-    def __call__(self, obs: jax.Array, act: jax.Array, t: jax.Array) -> jax.Array:
-        w = hk.get_parameter("w", shape=[self.embedding_dim, 1], init=hk.initializers.VarianceScaling())
+    
+    def _compute_phi(self, obs: jax.Array, act: jax.Array, t: jax.Array) -> jax.Array:
         act_dim = act.shape[-1]
         te = scaled_sinusoidal_encoding(t, dim=self.time_dim, batch_shape=obs.shape[:-1])
         te = hk.Linear(self.time_dim * 2)(te)
@@ -222,9 +221,18 @@ class DiffusionRepPolicyNet(hk.Module):
             phi_output = phi_output.reshape((phi_output.shape[0], act_dim, self.embedding_dim))
         elif len(phi_output.shape) == 1:
             phi_output = phi_output.reshape((act_dim, self.embedding_dim))
+        return phi_output
+
+    def __call__(self, obs: jax.Array, act: jax.Array, t: jax.Array) -> jax.Array:
+        phi_output = self._compute_phi(obs, act, t)
+        w = hk.get_parameter("w", shape=[self.embedding_dim, 1], init=hk.initializers.VarianceScaling())
         output = jnp.matmul(phi_output, w)
         output = jnp.squeeze(output, axis=-1)
         return output
+
+    def get_phi(self, obs: jax.Array, act: jax.Array, t: jax.Array) -> jax.Array:
+        return self._compute_phi(obs, act, t)
+    
     
 '''
 Mu network

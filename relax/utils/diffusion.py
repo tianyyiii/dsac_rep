@@ -138,5 +138,8 @@ class GaussianDiffusion:
         x_noisy = jax.vmap(self.q_sample)(t, x_start, noise)
         noise_pred = model(t, x_noisy)
         loss = weights * optax.squared_error(noise_pred, noise)
+        # B = self.beta_schedule()
+        # loss = weights * optax.squared_error(noise_pred, B.sqrt_alphas_cumprod[t][:, None] / B.sqrt_one_minus_alphas_cumprod[t][:, None] * noise)
         return loss.mean()
+    
 
