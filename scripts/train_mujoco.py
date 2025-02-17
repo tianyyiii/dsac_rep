@@ -13,12 +13,14 @@ from relax.algorithm.qsm import QSM
 from relax.algorithm.dipo import DIPO
 from relax.algorithm.qvpo import QVPO
 from relax.algorithm.sdac import SDAC
+from relax.algorithm.diffrep import DiffRep
 from relax.buffer import TreeBuffer
 from relax.network.sac import create_sac_net
 from relax.network.dacer import create_dacer_net
 from relax.network.qsm import create_qsm_net
 from relax.network.dipo import create_dipo_net
 from relax.network.sdac import create_sdac_net
+from relax.network.diffrep import create_diffrep_net
 from relax.network.qvpo import create_qvpo_net
 from relax.trainer.off_policy import OffPolicyTrainer
 from relax.env import create_env, create_vector_env
@@ -89,26 +91,31 @@ if __name__ == "__main__":
                            delay_alpha_update=args.delay_alpha_update,
                              lr_schedule_end=args.lr_schedule_end,
                              use_ema=args.use_ema_policy)
+    elif args.alg == 'diffrep':
+        def mish(x: jax.Array):
+            return x * jnp.tanh(jax.nn.softplus(x))
+        agent, params = create_diffrep_net(init_network_key, obs_dim, act_dim, hidden_sizes, diffusion_hidden_sizes, mish,
+                                          num_timesteps=args.diffusion_steps, 
+                                          num_particles=args.num_particles, 
+                                          noise_scale=args.noise_scale,
+                                          target_entropy_scale=args.target_entropy_scale)
+        algorithm = DiffRep(agent, params, lr=args.lr, alpha_lr=args.alpha_lr, 
+                           delay_alpha_update=args.delay_alpha_update,
+                             lr_schedule_end=args.lr_schedule_end,
+                             use_ema=args.use_ema_policy)
+
     elif args.alg == "qsm":
         agent, params = create_qsm_net(init_network_key, obs_dim, act_dim, hidden_sizes, num_timesteps=20, num_particles=args.num_particles)
         algorithm = QSM(agent, params, lr=args.lr, lr_schedule_end=args.lr_schedule_end)
     elif args.alg == "sac":
         agent, params = create_sac_net(init_network_key, obs_dim, act_dim, hidden_sizes, gelu)
         algorithm = SAC(agent, params, lr=args.lr)
-    elif args.alg == "dsact":
-        agent, params = create_dsact_net(init_network_key, obs_dim, act_dim, hidden_sizes, gelu)
-        algorithm = DSACT(agent, params, lr=args.lr)
     elif args.alg == "dacer":
         def mish(x: jax.Array):
             return x * jnp.tanh(jax.nn.softplus(x))
         agent, params = create_dacer_net(init_network_key, obs_dim, act_dim, hidden_sizes, diffusion_hidden_sizes, mish, 
                                          num_timesteps=args.diffusion_steps)
         algorithm = DACER(agent, params, lr=args.lr, lr_schedule_end=args.lr_schedule_end)
-    elif args.alg == "dacer_doubleq":
-        def mish(x: jax.Array):
-            return x * jnp.tanh(jax.nn.softplus(x))
-        agent, params = create_dacer_doubleq_net(init_network_key, obs_dim, act_dim, hidden_sizes, diffusion_hidden_sizes, mish, num_timesteps=args.diffusion_steps)
-        algorithm = DACERDoubleQ(agent, params, lr=args.lr)
     elif args.alg == "dipo":
         diffusion_buffer = TreeBuffer.from_example(
             ObsActionPair.create_example(obs_dim, act_dim),

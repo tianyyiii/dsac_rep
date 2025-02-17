@@ -195,6 +195,52 @@ class DACERPolicyNet(hk.Module):
         te = hk.Linear(self.time_dim)(te)
         input = jnp.concatenate((obs, act, te), axis=-1)
         return mlp(self.hidden_sizes, act_dim, self.activation, self.output_activation)(input)
+    
+'''
+Policy class for diffusion rep policy
+'''    
+@dataclass
+@fix_repr
+class DiffusionRepPolicyNet(hk.Module):
+    hidden_sizes: Sequence[int]
+    activation: Activation
+    output_activation: Activation = Identity
+    embedding_dim: int = 256
+    time_dim: int = 16
+    name: str = None
+
+    def __call__(self, obs: jax.Array, act: jax.Array, t: jax.Array) -> jax.Array:
+        w = hk.get_parameter("w", shape=[self.embedding_dim, 1], init=hk.initializers.VarianceScaling())
+        act_dim = act.shape[-1]
+        te = scaled_sinusoidal_encoding(t, dim=self.time_dim, batch_shape=obs.shape[:-1])
+        te = hk.Linear(self.time_dim * 2)(te)
+        te = self.activation(te)
+        te = hk.Linear(self.time_dim)(te)
+        input = jnp.concatenate((obs, act, te), axis=-1)
+        phi_output = mlp(self.hidden_sizes, act_dim * self.embedding_dim, self.activation, self.output_activation)(input)
+        if len(phi_output.shape) == 2:
+            phi_output = phi_output.reshape((phi_output.shape[0], act_dim, self.embedding_dim))
+        elif len(phi_output.shape) == 1:
+            phi_output = phi_output.reshape((act_dim, self.embedding_dim))
+        output = jnp.matmul(phi_output, w)
+        output = jnp.squeeze(output, axis=-1)
+        return output
+    
+'''
+Mu network
+'''
+@dataclass
+@fix_repr
+class DiffusionRepMuNet(hk.Module):
+    hidden_sizes: Sequence[int]
+    activation: Activation
+    output_activation: Activation = Identity
+    embedding_dim: int = 256
+    name: str = None
+
+    def __call__(self, next_obs: jax.Array) -> jax.Array:
+        output = mlp(self.hidden_sizes, self.embedding_dim, self.activation, self.output_activation)(next_obs)
+        return output
 
 def mlp(hidden_sizes: Sequence[int], output_size: int, activation: Activation, output_activation: Activation, *, squeeze_output: bool = False) -> Callable[[jax.Array], jax.Array]:
     layers = []
