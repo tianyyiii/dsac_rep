@@ -6,10 +6,12 @@ import json
 
 import gymnasium
 import numpy as np
+from metaworld.envs import ALL_V2_ENVIRONMENTS_GOAL_OBSERVABLE
 
 import setproctitle
 from relax.prctl import set_client_pdeathsig
 from relax.futex import futex_client_wait, futex_client_notify
+from relax.env import MetaWorldWrapper
 
 import warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning, module=r"^gymnasium\.")
@@ -35,7 +37,11 @@ def main():
 
     envs = []
     for seed in seeds:
-        env = gymnasium.make(args.env)
+        if "metaworld" in args.env:
+            env = ALL_V2_ENVIRONMENTS_GOAL_OBSERVABLE[args.env.split("/")[1]](seed=seed)
+            env = MetaWorldWrapper(env)
+        else:
+            env = gymnasium.make(args.env)
         env.reset(seed=seed)
         envs.append(env)
 

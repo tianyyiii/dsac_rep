@@ -50,6 +50,7 @@ if __name__ == "__main__":
     parser.add_argument("--noise_scale", type=float, default=0.1)
     parser.add_argument("--target_entropy_scale", type=float, default=1.5)
     parser.add_argument("--debug", action='store_true', default=False)
+    parser.add_argument("--rep_weight", type=float, default=0.0)
     parser.add_argument("--use_ema_policy", default=True, action="store_true")
     args = parser.parse_args()
 
@@ -102,7 +103,7 @@ if __name__ == "__main__":
         algorithm = DiffRep(agent, params, lr=args.lr, alpha_lr=args.alpha_lr, 
                            delay_alpha_update=args.delay_alpha_update,
                              lr_schedule_end=args.lr_schedule_end,
-                             use_ema=args.use_ema_policy)
+                             use_ema=args.use_ema_policy, rep_weight=args.rep_weight)
 
     elif args.alg == "qsm":
         agent, params = create_qsm_net(init_network_key, obs_dim, act_dim, hidden_sizes, num_timesteps=20, num_particles=args.num_particles)
@@ -144,6 +145,7 @@ if __name__ == "__main__":
     exp_dir = PROJECT_ROOT / "logs" / args.env / (args.alg + '_' + time.strftime("%Y-%m-%d_%H-%M-%S") + f'_s{args.seed}_{args.suffix}')
     trainer = OffPolicyTrainer(
         env=env,
+        env_name=args.env,
         algorithm=algorithm,
         buffer=buffer,
         start_step=args.start_step,

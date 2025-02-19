@@ -18,20 +18,24 @@ from relax.utils.persistence import PersistFunction
 def evaluate(env, policy_fn, policy_params, num_episodes):
     ep_len_list = []
     ep_ret_list = []
+    ep_success = 0
     for _ in range(num_episodes):
         obs, _ = env.reset()
         ep_len = 0
         ep_ret = 0.0
         while True:
             act = policy_fn(policy_params, obs)
-            obs, reward, terminated, truncated, _ = env.step(act)
+            obs, reward, terminated, truncated, info = env.step(act)
             ep_len += 1
             ep_ret += reward
+            if info["success"]:
+                terminated = True
+                ep_success += (1 / num_episodes)
             if terminated or truncated:
                 break
         ep_len_list.append(ep_len)
         ep_ret_list.append(ep_ret)
-    return ep_len_list, ep_ret_list
+    return ep_len_list, ep_ret_list, ep_success
 
 class Logger(object):
 
@@ -39,12 +43,12 @@ class Logger(object):
 		self.path = os.path.join(log_dir, 'log.csv')
 		with open(self.path, mode='w', newline='') as f:
 			writer = csv.writer(f)
-			writer.writerow(['step', 'avg_ret', 'std_ret'])
+			writer.writerow(['step', 'avg_ret', 'std_ret', 'success_rate'])
 
-	def log(self, step, avg_ret, std_ret):
+	def log(self, step, avg_ret, std_ret, success_rate):
 		with open(self.path, mode='a', newline='') as f:
 			writer = csv.writer(f)
-			writer.writerow([step, avg_ret, std_ret])
+			writer.writerow([step, avg_ret, std_ret, success_rate])
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -72,7 +76,7 @@ if __name__ == "__main__":
         with open(policy_path, "rb") as f:
             policy_params = pickle.load(f)
 
-        ep_len_list, ep_ret_list = evaluate(env, policy_fn, policy_params, args.num_episodes)
+        ep_len_list, ep_ret_list, ep_success = evaluate(env, policy_fn, policy_params, args.num_episodes)
 
         ep_len = np.array(ep_len_list)
         ep_ret = np.array(ep_ret_list)
@@ -81,4 +85,4 @@ if __name__ == "__main__":
         # # logger.add_histogram("evaluate/episode_length", ep_len_mean, step)
         # # logger.add_histogram("evaluate/episode_return", ep_ret_mean, step)
         # logger.flush()
-        logger.log(step, ep_ret.mean(), ep_ret.std())
+        logger.log(step, ep_ret.mean(), ep_ret.std(), ep_success)

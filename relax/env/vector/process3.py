@@ -8,6 +8,7 @@ from multiprocessing.shared_memory import SharedMemory
 import gymnasium
 from gymnasium.spaces import Box
 import numpy as np
+from metaworld.envs import ALL_V2_ENVIRONMENTS_GOAL_OBSERVABLE
 
 from relax.env.vector.base import VectorEnv
 from relax.futex import futex_server_wait, futex_server_notify
@@ -24,15 +25,21 @@ class ProcessVectorEnv(VectorEnv):
         self.num_workers = num_workers
         self.env_per_worker = num_envs // num_workers
 
-        dummy_env = gymnasium.make(name)
+        if "metaworld" in name:
+            dummy_env = ALL_V2_ENVIRONMENTS_GOAL_OBSERVABLE[name.split("/")[1]](seed=seed)
+        else:
+            dummy_env = gymnasium.make(name)
+
         self.single_observation_space = dummy_env.observation_space
         self.single_action_space = dummy_env.action_space
         dummy_env.close()
 
         self.spec = dummy_env.unwrapped.spec
 
-        assert isinstance(self.single_observation_space, Box) and len(self.single_observation_space.shape) == 1
-        assert isinstance(self.single_action_space, Box) and len(self.single_action_space.shape) == 1 and self.single_action_space.is_bounded()
+        # assert isinstance(self.single_observation_space, Box) and len(self.single_observation_space.shape) == 1
+        # assert isinstance(self.single_action_space, Box) and len(self.single_action_space.shape) == 1 and self.single_action_space.is_bounded()
+        assert len(self.single_observation_space.shape) == 1
+        assert len(self.single_action_space.shape) == 1 and self.single_action_space.is_bounded()
 
         self.obs_dim = self.single_observation_space.shape[0]
         self.act_dim = self.single_action_space.shape[0]

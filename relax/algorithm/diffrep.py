@@ -46,6 +46,7 @@ class DiffRep(Algorithm):
         reward_scale: float = 0.2,
         num_samples: int = 200,
         use_ema: bool = True,
+        rep_weight: float = 1.0,
     ):
         self.agent = agent
         self.gamma = gamma
@@ -80,6 +81,7 @@ class DiffRep(Algorithm):
             running_std=jnp.float32(1.0)
         )
         self.use_ema = use_ema
+        self.rep_weight = rep_weight
 
         @jax.jit
         def stateless_update(
@@ -144,7 +146,7 @@ class DiffRep(Algorithm):
                 mul = jnp.matmul(phi_output, mu_output[..., None])
                 mul = mul.squeeze(-1)
                 rep_loss = optax.squared_error(mul, noise).mean()
-                loss = loss + rep_loss
+                loss = loss + self.rep_weight * rep_loss
 
                 return loss, (q_weights, scaled_q, q_mean, q_std)
 

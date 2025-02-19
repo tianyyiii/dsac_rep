@@ -1,6 +1,7 @@
 import numpy as np
 from gymnasium import Env, Wrapper, make
 from gymnasium.spaces import Box
+from metaworld.envs import ALL_V2_ENVIRONMENTS_GOAL_OBSERVABLE
 
 from relax.env.vector import VectorEnv, SerialVectorEnv, GymProcessVectorEnv, PipeProcessVectorEnv, SpinlockProcessVectorEnv, FutexProcessVectorEnv
 
@@ -9,8 +10,9 @@ class RelaxWrapper(Wrapper):
         super().__init__(env)
         self.env: Env[np.ndarray, np.ndarray]
 
-        assert isinstance(env.observation_space, Box)
-        assert isinstance(env.action_space, Box) and env.action_space.is_bounded()
+        # assert isinstance(env.observation_space, Box)
+        # assert isinstance(env.action_space, Box) and env.action_space.is_bounded()
+        assert env.action_space.is_bounded()
         if isinstance(env, VectorEnv):
             _, self.obs_dim = env.observation_space.shape
             _, self.act_dim = env.action_space.shape
@@ -48,9 +50,43 @@ class RelaxWrapper(Wrapper):
             action += self.original_action_center
         obs, reward, terminated, truncated, info = self.env.step(action)
         return obs.astype(np.float32, copy=False), reward, terminated, truncated, info
+    
+class MetaWorldWrapper(Wrapper):
+    def __init__(self, env, max_episode_steps=250):
+        self.env = env
+        self.observation_space = self.env.observation_space
+        self.action_space = self.env.action_space
+        self.env._freeze_rand_vec = False
+        self._max_episode_steps = max_episode_steps
+        self._t = 0
+
+    def reset(self, **kwargs):
+        obs = self.env.reset()
+        self._t = 0
+        return obs, {}
+
+    def step(self, action):
+        total_reward = 0
+        for _ in range(2):
+            obs, reward, done, info = self.env.step(action.copy())
+            total_reward += reward
+            self._t += 1
+        obs = obs.astype(np.float32)
+        terminated = False
+        truncated = (self._t >= self._max_episode_steps)
+        return obs, total_reward, terminated, truncated, info
+
+    @property
+    def unwrapped(self):
+        return self.env.unwrapped
+    
 
 def create_env(name: str, seed: int, action_seed: int = 0):
-    env = make(name)
+    if "metaworld" in name:
+        env = ALL_V2_ENVIRONMENTS_GOAL_OBSERVABLE[name.split("/")[1]](seed=seed)
+        env = MetaWorldWrapper(env)
+    else:
+        env = make(name)
     env.reset(seed=seed)
     env = RelaxWrapper(env, action_seed)
     return env, env.obs_dim, env.act_dim

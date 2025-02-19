@@ -21,6 +21,7 @@ class OffPolicyTrainer:
     def __init__(
         self,
         env: Env,
+        env_name: str,
         algorithm: Algorithm,
         buffer: ExperienceBuffer,
         log_path: Path,
@@ -38,9 +39,10 @@ class OffPolicyTrainer:
         save_policy_every: int = 10000,
         hparams: Optional[dict] = None,
         policy_pkl_template: str = "policy-{sample_step}-{update_step}.pkl",
-        warmup_with: str = "random",  # "policy" or "random"
+        warmup_with: str = "random",  # "policy" or "random",
     ):
         self.env = env
+        self.env_name = env_name
         self.algorithm = algorithm
         self.buffer = buffer
         self.batch_size = batch_size
@@ -86,7 +88,7 @@ class OffPolicyTrainer:
                 sys.executable,
                 "-m", "relax.trainer.evaluator",
                 str(self.log_path),
-                "--env", self.env.spec.id,
+                "--env", self.env_name,
                 "--num_episodes", str(self.evaluate_n_episode),
                 "--seed", str(0),
             ],
