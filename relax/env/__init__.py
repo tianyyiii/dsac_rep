@@ -52,7 +52,7 @@ class RelaxWrapper(Wrapper):
         return obs.astype(np.float32, copy=False), reward, terminated, truncated, info
     
 class MetaWorldWrapper(Wrapper):
-    def __init__(self, env, max_episode_steps=250):
+    def __init__(self, env, max_episode_steps=500):
         self.env = env
         self.observation_space = self.env.observation_space
         self.action_space = self.env.action_space

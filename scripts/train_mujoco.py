@@ -40,7 +40,8 @@ if __name__ == "__main__":
     parser.add_argument("--diffusion_steps", type=int, default=20)
     parser.add_argument("--diffusion_hidden_dim", type=int, default=256)
     parser.add_argument("--start_step", type=int, default=int(3e4)) # other envs 3e4
-    parser.add_argument("--total_step", type=int, default=int(1e6))
+    parser.add_argument("--total_step", type=int, default=int(2e6)) #1e6
+    parser.add_argument("--update_per_iteration", type=int, default=1)
     parser.add_argument("--lr", type=float, default=3e-4)
     parser.add_argument("--lr_schedule_end", type=float, default=3e-5)
     parser.add_argument("--alpha_lr", type=float, default=7e-3)
@@ -151,6 +152,7 @@ if __name__ == "__main__":
         start_step=args.start_step,
         total_step=args.total_step,
         sample_per_iteration=1,
+        update_per_iteration=args.update_per_iteration,
         evaluate_env=eval_env,
         save_policy_every=int(args.total_step / 40),
         warmup_with="random",
