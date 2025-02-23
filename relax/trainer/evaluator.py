@@ -1,12 +1,14 @@
 import os
 os.environ["JAX_PLATFORMS"] = "cpu"
 os.environ["OMP_NUM_THREADS"] = "1"
+os.environ['MUJOCO_GL'] = "egl"
 
 import sys
 from pathlib import Path
 import argparse
 import pickle
 import csv
+import imageio
 
 import numpy as np
 import jax
@@ -15,11 +17,12 @@ from tensorboardX import SummaryWriter
 from relax.env import create_env
 from relax.utils.persistence import PersistFunction
 
-def evaluate(env, policy_fn, policy_params, num_episodes):
+def evaluate(env, policy_fn, policy_params, num_episodes, policy_root, render=False):
     ep_len_list = []
     ep_ret_list = []
+    frames = []
     ep_success = 0
-    for _ in range(num_episodes):
+    for episode_i in range(num_episodes):
         obs, _ = env.reset()
         ep_len = 0
         ep_ret = 0.0
@@ -28,6 +31,9 @@ def evaluate(env, policy_fn, policy_params, num_episodes):
             obs, reward, terminated, truncated, info = env.step(act)
             ep_len += 1
             ep_ret += reward
+            if render and episode_i == 0:
+                frame = env.unwrapped.render(offscreen=True, resolution=(256,256))
+                frames.append(frame)
             if info["success"]:
                 terminated = True
                 ep_success += (1 / num_episodes)
@@ -35,6 +41,9 @@ def evaluate(env, policy_fn, policy_params, num_episodes):
                 break
         ep_len_list.append(ep_len)
         ep_ret_list.append(ep_ret)
+    if render:
+        video_filename = f"{policy_root}/step_{step}.mp4"
+        imageio.mimsave(video_filename, frames, fps=30)
     return ep_len_list, ep_ret_list, ep_success
 
 class Logger(object):
@@ -76,7 +85,7 @@ if __name__ == "__main__":
         with open(policy_path, "rb") as f:
             policy_params = pickle.load(f)
 
-        ep_len_list, ep_ret_list, ep_success = evaluate(env, policy_fn, policy_params, args.num_episodes)
+        ep_len_list, ep_ret_list, ep_success = evaluate(env, policy_fn, policy_params, args.num_episodes, args.policy_root)
 
         ep_len = np.array(ep_len_list)
         ep_ret = np.array(ep_ret_list)
