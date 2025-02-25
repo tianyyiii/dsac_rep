@@ -25,7 +25,7 @@ class DiffRepParams(NamedTuple):
 class DiffRepNet:
     q: Callable[[hk.Params, jax.Array, jax.Array], jax.Array]
     policy: Callable[[hk.Params, jax.Array, jax.Array, jax.Array], jax.Array]
-    mu: Callable[[hk.Params, jax.Array, jax.Array], jax.Array]
+    mu: Callable[[hk.Params, jax.Array], jax.Array]
     num_timesteps: int
     act_dim: int
     num_particles: int
