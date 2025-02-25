@@ -210,20 +210,28 @@ class DiffusionRepPolicyNet(hk.Module):
     name: str = None
 
     def __call__(self, obs: jax.Array, act: jax.Array, t: jax.Array) -> jax.Array:
-        w = hk.get_parameter("w", shape=[self.embedding_dim, 1], init=hk.initializers.VarianceScaling())
+        #w = hk.get_parameter("w", shape=[self.embedding_dim, 1], init=hk.initializers.VarianceScaling())
         act_dim = act.shape[-1]
         te = scaled_sinusoidal_encoding(t, dim=self.time_dim, batch_shape=obs.shape[:-1])
         te = hk.Linear(self.time_dim * 2)(te)
         te = self.activation(te)
         te = hk.Linear(self.time_dim)(te)
         input = jnp.concatenate((obs, act, te), axis=-1)
+        # phi_output = mlp(self.hidden_sizes, act_dim * self.embedding_dim, self.activation, self.output_activation)(input)
+        # if len(phi_output.shape) == 2:
+        #     phi_output = phi_output.reshape((phi_output.shape[0], act_dim, self.embedding_dim))
+        # elif len(phi_output.shape) == 1:
+        #     phi_output = phi_output.reshape((act_dim, self.embedding_dim))
+        #output = jnp.matmul(phi_output, w)
+        #output = jnp.squeeze(output, axis=-1)
         phi_output = mlp(self.hidden_sizes, act_dim * self.embedding_dim, self.activation, self.output_activation)(input)
+        output = hk.Linear(self.embedding_dim)(phi_output)
+        output = self.activation(output)
+        output = hk.Linear(act_dim)(output)
         if len(phi_output.shape) == 2:
             phi_output = phi_output.reshape((phi_output.shape[0], act_dim, self.embedding_dim))
         elif len(phi_output.shape) == 1:
             phi_output = phi_output.reshape((act_dim, self.embedding_dim))
-        output = jnp.matmul(phi_output, w)
-        output = jnp.squeeze(output, axis=-1)
         return phi_output, output
     
     

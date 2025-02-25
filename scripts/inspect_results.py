@@ -29,6 +29,7 @@ def plot_mean(patterns_dict: Dict, env_name, fig_name = None,
         for dir in matching_dir:
             csv_path = dir / 'log.csv'
             df = pd.read_csv(str(csv_path))
+            print(str(dir), "dir")
             df.loc[:, ('seed')] = str(dir).split('_s')[1].split('_')[0]
             df.loc[:, ('alg')] = alg
             dfs.append(df)
@@ -69,13 +70,10 @@ def load_best_results(pattern, env_name, show_df=False,
     return total_df
 
 if __name__ == "__main__":
-    for env in ["pick-place"]:
-        env += "-v2-goal-observable"
+    for env in ['bin-picking-v2-goal-observable', 'disassemble-v2-goal-observable']:
         patterns_dict = {
-            # 'sac': r".*sac.*metaworldseed1$",
-            'rep_weight_0': r".*diffrep.*rep_weight_0$",
-            'rep_weight_0.1': r".*diffrep.*rep_weight_0.1$",
-            'rep_weight_0.01': r".*diffrep.*rep_weight_0.01$",
-            'rep_weight_10': r".*diffrep.*rep_weight_10$",
+            'rep_weight_0': r".*/diffrep.*random_seed_rep_test_weight_0.0.*",
+            'rep_weight_0.01': r".*/diffrep.*random_seed_rep_test_weight_0.01.*",
+            'rep_weight_10': r".*/diffrep.*random_seed_rep_test_weight_10.*",
         }
         plot_mean(patterns_dict, f'metaworld/{env}', f"figures/metaworld_{env}.pdf")

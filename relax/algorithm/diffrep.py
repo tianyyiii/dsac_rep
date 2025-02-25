@@ -104,7 +104,7 @@ class DiffRep(Algorithm):
                 q = jnp.minimum(q1, q2)
                 return q
 
-            def get_min_taret_q(s, a):
+            def get_min_target_q(s, a):
                 q1 = self.agent.q(target_q1_params, s, a)
                 q2 = self.agent.q(target_q2_params, s, a)
                 q = jnp.minimum(q1, q2)

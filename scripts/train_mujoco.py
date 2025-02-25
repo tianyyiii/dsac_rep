@@ -38,6 +38,7 @@ if __name__ == "__main__":
     parser.add_argument("--hidden_num", type=int, default=3)
     parser.add_argument("--hidden_dim", type=int, default=256)
     parser.add_argument("--diffusion_steps", type=int, default=20)
+    parser.add_argument("--diffusion_hidden_num", type=int, default=3)
     parser.add_argument("--diffusion_hidden_dim", type=int, default=256)
     parser.add_argument("--start_step", type=int, default=int(3e4)) # other envs 3e4
     parser.add_argument("--total_step", type=int, default=int(2e6)) #1e6
@@ -75,7 +76,7 @@ if __name__ == "__main__":
     eval_env = None
 
     hidden_sizes = [args.hidden_dim] * args.hidden_num
-    diffusion_hidden_sizes = [args.diffusion_hidden_dim] * args.hidden_num
+    diffusion_hidden_sizes = [args.diffusion_hidden_dim] * args.diffusion_hidden_num
 
     buffer = TreeBuffer.from_experience(obs_dim, act_dim, size=int(1e6), seed=buffer_seed)
 
