@@ -1,3 +1,4 @@
+from collections import deque
 import numpy as np
 from gymnasium import Env, Wrapper, make
 from gymnasium.spaces import Box
@@ -52,10 +53,16 @@ class RelaxWrapper(Wrapper):
         return obs.astype(np.float32, copy=False), reward, terminated, truncated, info
     
 class MetaWorldWrapper(Wrapper):
-    def __init__(self, env, max_episode_steps=500):
+    def __init__(self, env, obs_type="state", n_stack=2, max_episode_steps=500):
         self.env = env
-        self.observation_space = self.env.observation_space
+        self.obs_type = obs_type
+        if self.obs_type == "image":
+            self.observation_space = Box(low=0, high=255, shape=(64, 64, 3 * n_stack), dtype=np.uint8)
+        else:
+            self.observation_space = self.env.observation_space
         self.action_space = self.env.action_space
+        self.n_stack = n_stack
+        self.frames = deque(maxlen=n_stack)
         self.env._freeze_rand_vec = False
         self._max_episode_steps = max_episode_steps
         self._t = 0
@@ -63,6 +70,11 @@ class MetaWorldWrapper(Wrapper):
     def reset(self, **kwargs):
         obs = self.env.reset()
         self._t = 0
+        if self.obs_type == "image":
+            frame = self.env.render(offscreen=True, resolution=(64,64))
+            for _ in range(self.n_stack):
+                self.frames.append(frame)
+            obs = np.concatenate(list(self.frames), axis=2)
         return obs, {}
 
     def step(self, action):
@@ -71,7 +83,12 @@ class MetaWorldWrapper(Wrapper):
             obs, reward, done, info = self.env.step(action.copy())
             total_reward += reward
             self._t += 1
-        obs = obs.astype(np.float32)
+        if self.obs_type == "image":
+            frame = self.env.render(offscreen=True, resolution=(64, 64))
+            self.frames.append(frame)
+            obs = np.concatenate(list(self.frames), axis=2)
+        else:
+            obs = obs.astype(np.float32)
         terminated = False
         truncated = (self._t >= self._max_episode_steps)
         return obs, total_reward, terminated, truncated, info

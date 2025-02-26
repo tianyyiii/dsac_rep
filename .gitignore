@@ -22,7 +22,7 @@ __pycache__/
 **/*.mp4
 /metaworld_results/
 
-test.py
+test*.py
 
 */.ipynb_checkpoints
 *.png
