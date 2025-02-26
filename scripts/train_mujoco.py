@@ -14,6 +14,7 @@ from relax.algorithm.dipo import DIPO
 from relax.algorithm.qvpo import QVPO
 from relax.algorithm.sdac import SDAC
 from relax.algorithm.diffrep import DiffRep
+from relax.algorithm.diffrep_image import DiffRepImage
 from relax.buffer import TreeBuffer
 from relax.network.sac import create_sac_net
 from relax.network.dacer import create_dacer_net
@@ -21,6 +22,7 @@ from relax.network.qsm import create_qsm_net
 from relax.network.dipo import create_dipo_net
 from relax.network.sdac import create_sdac_net
 from relax.network.diffrep import create_diffrep_net
+from relax.network.diffrep_image import create_diffrep_image_net
 from relax.network.qvpo import create_qvpo_net
 from relax.trainer.off_policy import OffPolicyTrainer
 from relax.env import create_env, create_vector_env
@@ -40,6 +42,7 @@ if __name__ == "__main__":
     parser.add_argument("--diffusion_steps", type=int, default=20)
     parser.add_argument("--diffusion_hidden_num", type=int, default=3)
     parser.add_argument("--diffusion_hidden_dim", type=int, default=256)
+    parser.add_argument("--visual_embedding_dim", type=int, default=64)
     parser.add_argument("--start_step", type=int, default=int(3e4)) # other envs 3e4
     parser.add_argument("--total_step", type=int, default=int(2e6)) #1e6
     parser.add_argument("--update_per_iteration", type=int, default=1)
@@ -103,6 +106,19 @@ if __name__ == "__main__":
                                           noise_scale=args.noise_scale,
                                           target_entropy_scale=args.target_entropy_scale)
         algorithm = DiffRep(agent, params, lr=args.lr, alpha_lr=args.alpha_lr, 
+                           delay_alpha_update=args.delay_alpha_update,
+                             lr_schedule_end=args.lr_schedule_end,
+                             use_ema=args.use_ema_policy, rep_weight=args.rep_weight)
+        
+    elif args.alg == 'diffrep_image':
+        def mish(x: jax.Array):
+            return x * jnp.tanh(jax.nn.softplus(x))
+        agent, params = create_diffrep_image_net(init_network_key, obs_dim, act_dim, args.visual_embedding_dim, hidden_sizes, diffusion_hidden_sizes, mish,
+                                          num_timesteps=args.diffusion_steps, 
+                                          num_particles=args.num_particles, 
+                                          noise_scale=args.noise_scale,
+                                          target_entropy_scale=args.target_entropy_scale)
+        algorithm = DiffRepImage(agent, params, lr=args.lr, alpha_lr=args.alpha_lr, 
                            delay_alpha_update=args.delay_alpha_update,
                              lr_schedule_end=args.lr_schedule_end,
                              use_ema=args.use_ema_policy, rep_weight=args.rep_weight)

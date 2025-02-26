@@ -98,17 +98,17 @@ class MetaWorldWrapper(Wrapper):
         return self.env.unwrapped
     
 
-def create_env(name: str, seed: int, action_seed: int = 0):
+def create_env(name: str, seed: int, obs_type: str = "state", action_seed: int = 0):
     if "metaworld" in name:
         env = ALL_V2_ENVIRONMENTS_GOAL_OBSERVABLE[name.split("/")[1]](seed=seed)
-        env = MetaWorldWrapper(env)
+        env = MetaWorldWrapper(env, obs_type)
     else:
         env = make(name)
     env.reset(seed=seed)
     env = RelaxWrapper(env, action_seed)
     return env, env.obs_dim, env.act_dim
 
-def create_vector_env(name: str, num_envs: int, seed: int, action_seed: int = 0, mode: str = "serial", **kwargs):
+def create_vector_env(name: str, num_envs: int, seed: int, action_seed: int = 0, obs_type: str = "state", mode: str = "serial", **kwargs):
     Impl = {
         "serial": SerialVectorEnv,
         "gym": GymProcessVectorEnv,

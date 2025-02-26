@@ -8,37 +8,39 @@ import pickle
 
 from relax.algorithm.base import Algorithm
 from relax.network.dacer import DACERNet, DACERParams
-from relax.network.diffrep import DiffRepNet, DiffRepParams
+from relax.network.diffrep_image import DiffRepImageNet, DiffRepImageParams
 from relax.utils.experience import Experience
 from relax.utils.typing import Metric
 
 
-class DiffRepOptStates(NamedTuple):
+class DiffRepImageOptStates(NamedTuple):
     q1: optax.OptState
     q2: optax.OptState
     policy: optax.OptState
     mu: optax.OptState
+    encoder_v: optax.OptState
     log_alpha: optax.OptState
 
 
-class DiffRepTrainState(NamedTuple):
-    params: DiffRepParams
-    opt_state: DiffRepOptStates
+class DiffRepImageTrainState(NamedTuple):
+    params: DiffRepImageParams
+    opt_state: DiffRepImageOptStates
     step: int
     entropy: float
     running_mean: float
     running_std: float
 
-class DiffRep(Algorithm):
+class DiffRepImage(Algorithm):
 
     def __init__(
         self,
-        agent: DiffRepNet,
-        params: DiffRepParams,
+        agent: DiffRepImageNet,
+        params: DiffRepImageParams,
         *,
         gamma: float = 0.99,
         lr: float = 1e-4,
         alpha_lr: float = 3e-2,
+        encoder_lr: float = 1e-4,
         lr_schedule_end: float = 5e-5,
         tau: float = 0.005,
         delay_alpha_update: int = 250,
@@ -64,15 +66,17 @@ class DiffRep(Algorithm):
         )
         self.policy_optim = optax.adam(learning_rate=lr_schedule)
         self.alpha_optim = optax.adam(alpha_lr)
+        self.encoder_optim = optax.adam(encoder_lr)
         self.entropy = 0.0
 
-        self.state = DiffRepTrainState(
+        self.state = DiffRepImageTrainState(
             params=params,
-            opt_state=DiffRepOptStates(
+            opt_state=DiffRepImageOptStates(
                 q1=self.optim.init(params.q1),
                 q2=self.optim.init(params.q2),
                 policy=self.policy_optim.init(params.policy),
                 mu=self.policy_optim.init(params.mu),
+                encoder_v=self.encoder_optim.init(params.encoder_v),
                 log_alpha=self.alpha_optim.init(params.log_alpha),
             ),
             step=jnp.int32(0),
@@ -85,11 +89,11 @@ class DiffRep(Algorithm):
 
         @jax.jit
         def stateless_update(
-            key: jax.Array, state: DiffRepTrainState, data: Experience
-        ) -> Tuple[DiffRepOptStates, Metric]:
+            key: jax.Array, state: DiffRepImageTrainState, data: Experience
+        ) -> Tuple[DiffRepImageOptStates, Metric]:
             obs, action, reward, next_obs, done = data.obs, data.action, data.reward, data.next_obs, data.done
-            q1_params, q2_params, target_q1_params, target_q2_params, policy_params, target_policy_params, mu_params, log_alpha = state.params
-            q1_opt_state, q2_opt_state, policy_opt_state, mu_opt_state, log_alpha_opt_state = state.opt_state
+            q1_params, q2_params, target_q1_params, target_q2_params, policy_params, target_policy_params, mu_params, encoder_v_params, log_alpha = state.params
+            q1_opt_state, q2_opt_state, policy_opt_state, mu_opt_state, encoder_v_opt_state, log_alpha_opt_state = state.opt_state
             step = state.step
             running_mean = state.running_mean
             running_std = state.running_std
@@ -116,33 +120,37 @@ class DiffRep(Algorithm):
             q_target = jnp.minimum(q1_target, q2_target)  # - jnp.exp(log_alpha) * next_logp
             q_backup = reward + (1 - done) * self.gamma * q_target
 
-            def q_loss_fn(q_params: hk.Params) -> jax.Array:
-                q = self.agent.q(q_params, obs, action)
+            def q_loss_fn(q_params: hk.Params, encoder_v_params: hk.Params) -> Tuple[jax.Array, jax.Array]:
+                encoded_obs = self.agent.encoder_v(encoder_v_params, obs)
+                q = self.agent.q(q_params, encoded_obs, action)
                 q_loss = jnp.mean((q - q_backup) ** 2)
                 return q_loss, q
 
-            (q1_loss, q1), q1_grads = jax.value_and_grad(q_loss_fn, has_aux=True)(q1_params)
-            (q2_loss, q2), q2_grads = jax.value_and_grad(q_loss_fn, has_aux=True)(q2_params)
+            (q1_loss, q1), (q1_grads, encoder_grad_q1) = jax.value_and_grad(q_loss_fn, argnums=(0, 1), has_aux=True)(q1_params, encoder_v_params)
+            (q2_loss, q2), (q2_grads, encoder_grad_q2) = jax.value_and_grad(q_loss_fn, argnums=(0, 1), has_aux=True)(q2_params, encoder_v_params)
+
             # q1_update, q1_opt_state = self.optim.update(q1_grads, q1_opt_state)
             # q2_update, q2_opt_state = self.optim.update(q2_grads, q2_opt_state)
             # q1_params = optax.apply_updates(q1_params, q1_update)
             # q2_params = optax.apply_updates(q2_params, q2_update)
 
 
-            def policy_loss_fn(policy_params, mu_params) -> jax.Array:
-                q_min = get_min_q(next_obs, next_action)
+            def policy_loss_fn(policy_params, mu_params, encoder_v_params: hk.Params) -> jax.Array:
+                encoded_p_obs = self.agent.encoder_v(encoder_v_params, obs)
+                encoded_p_next_obs = self.agent.encoder_v(encoder_v_params, next_obs)
+                q_min = get_min_q(encoded_p_next_obs, next_action)
                 q_mean, q_std = q_min.mean(), q_min.std()
                 norm_q = q_min - running_mean / running_std
                 scaled_q = norm_q.clip(-3., 3.) / jnp.exp(log_alpha)
                 q_weights = jnp.exp(scaled_q)
                 def denoiser(t, x):
-                    return self.agent.policy(policy_params, next_obs, x, t)[1]
-                t = jax.random.randint(diffusion_time_key, (next_obs.shape[0],), 0, self.agent.num_timesteps)
+                    return self.agent.policy(policy_params, encoded_p_next_obs, x, t)[1]
+                t = jax.random.randint(diffusion_time_key, (encoded_p_next_obs.shape[0],), 0, self.agent.num_timesteps)
                 noise, x_noisy, loss = self.agent.diffusion.weighted_p_loss(diffusion_noise_key, q_weights, denoiser, t,
                                                             jax.lax.stop_gradient(next_action))
                 
-                phi_output = self.agent.policy(policy_params, obs, x_noisy, t)[0]
-                mu_output = self.agent.mu(mu_params, next_obs)
+                phi_output = self.agent.policy(policy_params, encoded_p_obs, x_noisy, t)[0]
+                mu_output = self.agent.mu(mu_params, encoded_p_next_obs)
                 mul = jnp.matmul(phi_output, mu_output[..., None])
                 mul = mul.squeeze(-1)
                 rep_loss = optax.squared_error(mul, noise).mean()
@@ -150,7 +158,7 @@ class DiffRep(Algorithm):
 
                 return loss, (q_weights, scaled_q, q_mean, q_std)
 
-            (total_loss, (q_weights, scaled_q, q_mean, q_std)), (policy_grads, mu_grads) = jax.value_and_grad(policy_loss_fn, argnums=(0, 1), has_aux=True)(policy_params, mu_params)
+            (total_loss, (q_weights, scaled_q, q_mean, q_std)), (policy_grads, mu_grads, encoder_grad_policy) = jax.value_and_grad(policy_loss_fn, argnums=(0, 1, 2), has_aux=True)(policy_params, mu_params, encoder_v_params)
 
             # update alpha
             def log_alpha_loss_fn(log_alpha: jax.Array) -> jax.Array:
@@ -194,6 +202,9 @@ class DiffRep(Algorithm):
             mu_params, mu_opt_state = delay_param_update(self.policy_optim, mu_params, mu_grads, mu_opt_state)
             log_alpha, log_alpha_opt_state = delay_alpha_param_update(self.alpha_optim, log_alpha, log_alpha_opt_state)
 
+            total_encoder_grad = encoder_grad_q1 + encoder_grad_policy
+            encoder_v_params, encoder_v_opt_state = param_update(self.encoder_optim, encoder_v_params, total_encoder_grad, encoder_v_opt_state)
+
             target_q1_params = delay_target_update(q1_params, target_q1_params, self.tau)
             target_q2_params = delay_target_update(q2_params, target_q2_params, self.tau)
             target_policy_params = delay_target_update(policy_params, target_policy_params, self.tau)
@@ -201,9 +212,9 @@ class DiffRep(Algorithm):
             new_running_mean = running_mean + 0.001 * (q_mean - running_mean)
             new_running_std = running_std + 0.001 * (q_std - running_std)
 
-            state = DiffRepTrainState(
-                params=DiffRepParams(q1_params, q2_params, target_q1_params, target_q2_params, policy_params, target_policy_params, mu_params, log_alpha),
-                opt_state=DiffRepOptStates(q1=q1_opt_state, q2=q2_opt_state, policy=policy_opt_state, mu=mu_opt_state, log_alpha=log_alpha_opt_state),
+            state = DiffRepImageTrainState(
+                params=DiffRepImageParams(q1_params, q2_params, target_q1_params, target_q2_params, policy_params, target_policy_params, mu_params, log_alpha),
+                opt_state=DiffRepImageOptStates(q1=q1_opt_state, q2=q2_opt_state, policy=policy_opt_state, mu=mu_opt_state, log_alpha=log_alpha_opt_state),
                 step=step + 1,
                 entropy=jnp.float32(0.0),
                 running_mean=new_running_mean,
