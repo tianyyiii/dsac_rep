@@ -62,7 +62,14 @@ class DiffRep(Algorithm):
             transition_steps=int(5e4),
             transition_begin=int(2.5e4),
         )
+        lr_schedule_mu = optax.schedules.linear_schedule(
+            init_value=lr / 100,
+            end_value=lr_schedule_end / 100,
+            transition_steps=int(5e4),
+            transition_begin=int(2.5e4),
+        )
         self.policy_optim = optax.adam(learning_rate=lr_schedule)
+        self.mu_optim = optax.adam(learning_rate=lr_schedule_mu)
         self.alpha_optim = optax.adam(alpha_lr)
         self.entropy = 0.0
 
@@ -123,10 +130,10 @@ class DiffRep(Algorithm):
 
             (q1_loss, q1), q1_grads = jax.value_and_grad(q_loss_fn, has_aux=True)(q1_params)
             (q2_loss, q2), q2_grads = jax.value_and_grad(q_loss_fn, has_aux=True)(q2_params)
-            # q1_update, q1_opt_state = self.optim.update(q1_grads, q1_opt_state)
-            # q2_update, q2_opt_state = self.optim.update(q2_grads, q2_opt_state)
-            # q1_params = optax.apply_updates(q1_params, q1_update)
-            # q2_params = optax.apply_updates(q2_params, q2_update)
+            q1_update, q1_opt_state = self.optim.update(q1_grads, q1_opt_state)
+            q2_update, q2_opt_state = self.optim.update(q2_grads, q2_opt_state)
+            q1_params = optax.apply_updates(q1_params, q1_update)
+            q2_params = optax.apply_updates(q2_params, q2_update)
 
 
             def policy_loss_fn(policy_params, mu_params) -> jax.Array:
@@ -191,7 +198,7 @@ class DiffRep(Algorithm):
             q1_params, q1_opt_state = param_update(self.optim, q1_params, q1_grads, q1_opt_state)
             q2_params, q2_opt_state = param_update(self.optim, q2_params, q2_grads, q2_opt_state)
             policy_params, policy_opt_state = delay_param_update(self.policy_optim, policy_params, policy_grads, policy_opt_state)
-            mu_params, mu_opt_state = delay_param_update(self.policy_optim, mu_params, mu_grads, mu_opt_state)
+            mu_params, mu_opt_state = delay_param_update(self.mu_optim, mu_params, mu_grads, mu_opt_state)
             log_alpha, log_alpha_opt_state = delay_alpha_param_update(self.alpha_optim, log_alpha, log_alpha_opt_state)
 
             target_q1_params = delay_target_update(q1_params, target_q1_params, self.tau)

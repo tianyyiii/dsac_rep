@@ -11,12 +11,13 @@ import numpy as np
 from metaworld.envs import ALL_V2_ENVIRONMENTS_GOAL_OBSERVABLE
 
 from relax.env.vector.base import VectorEnv
+from relax.env import MetaWorldWrapper
 from relax.futex import futex_server_wait, futex_server_notify
 
 WORKER_PATH = Path(__file__).parent / "worker3.py"
 
 class ProcessVectorEnv(VectorEnv):
-    def __init__(self, name: str, num_envs: int, seed: int, *, num_workers: int = None):
+    def __init__(self, name: str, num_envs: int, seed: int, obs_type: str, *, num_workers: int = None):
         if num_workers is None:
             num_workers = num_envs
         else:
@@ -27,6 +28,7 @@ class ProcessVectorEnv(VectorEnv):
 
         if "metaworld" in name:
             dummy_env = ALL_V2_ENVIRONMENTS_GOAL_OBSERVABLE[name.split("/")[1]](seed=seed)
+            dummy_env = MetaWorldWrapper(dummy_env, obs_type)
         else:
             dummy_env = gymnasium.make(name)
 
@@ -93,6 +95,7 @@ class ProcessVectorEnv(VectorEnv):
                     sys.executable,
                     str(WORKER_PATH),
                     "--env", name,
+                    "--obs_type", obs_type,
                     "--index", ",".join(map(str, index)),
                     "--seed", ",".join(str(seeds[j]) for j in index),
                     "--descr", json.dumps(descr),

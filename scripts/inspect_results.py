@@ -70,10 +70,10 @@ def load_best_results(pattern, env_name, show_df=False,
     return total_df
 
 if __name__ == "__main__":
-    for env in ['assembly-v2-goal-observable', 'pick-place-wall-v2-goal-observable']:
+    for env in ['disassemble-v2-goal-observable', 'bin-picking-v2-goal-observable']:
         patterns_dict = {
-            'rep_weight_0': r".*/diffrep.*random_seed_rep_test_weight_0.0.*",
-            'rep_weight_0.01': r".*/diffrep.*random_seed_rep_test_weight_0.01.*",
-            'rep_weight_10': r".*/diffrep.*random_seed_rep_test_weight_10.*",
+            'rep_weight_0': r".*/diffrep.*random_seed_rep_test_weight_mu_update_0.0.*",
+            'rep_weight_0.01': r".*/diffrep.*random_seed_rep_test_weight_mu_update_0.01.*",
+            'rep_weight_10': r".*/diffrep.*random_seed_rep_test_weight_mu_update_10.*",
         }
         plot_mean(patterns_dict, f'metaworld/{env}', f"figures/metaworld_{env}.pdf")

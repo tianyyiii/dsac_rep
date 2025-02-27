@@ -19,6 +19,7 @@ warnings.filterwarnings("ignore", category=DeprecationWarning, module=r"^gymnasi
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--env", type=str, required=True)
+    parser.add_argument("--obs_type", type=str, required=True)
     parser.add_argument("--index", type=str, required=True)
     parser.add_argument("--seed", type=str, required=True)
     parser.add_argument("--descr", type=str, required=True)
@@ -39,7 +40,7 @@ def main():
     for seed in seeds:
         if "metaworld" in args.env:
             env = ALL_V2_ENVIRONMENTS_GOAL_OBSERVABLE[args.env.split("/")[1]](seed=seed)
-            env = MetaWorldWrapper(env)
+            env = MetaWorldWrapper(env, obs_type)
         else:
             env = gymnasium.make(args.env)
         env.reset(seed=seed)
