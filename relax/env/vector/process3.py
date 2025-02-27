@@ -11,7 +11,7 @@ import numpy as np
 from metaworld.envs import ALL_V2_ENVIRONMENTS_GOAL_OBSERVABLE
 
 from relax.env.vector.base import VectorEnv
-from relax.env import MetaWorldWrapper
+# from relax.env import MetaWorldWrapper
 from relax.futex import futex_server_wait, futex_server_notify
 
 WORKER_PATH = Path(__file__).parent / "worker3.py"
@@ -28,7 +28,7 @@ class ProcessVectorEnv(VectorEnv):
 
         if "metaworld" in name:
             dummy_env = ALL_V2_ENVIRONMENTS_GOAL_OBSERVABLE[name.split("/")[1]](seed=seed)
-            dummy_env = MetaWorldWrapper(dummy_env, obs_type)
+            # dummy_env = MetaWorldWrapper(dummy_env, obs_type)
         else:
             dummy_env = gymnasium.make(name)
 

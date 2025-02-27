@@ -40,7 +40,7 @@ def main():
     for seed in seeds:
         if "metaworld" in args.env:
             env = ALL_V2_ENVIRONMENTS_GOAL_OBSERVABLE[args.env.split("/")[1]](seed=seed)
-            env = MetaWorldWrapper(env, obs_type)
+            env = MetaWorldWrapper(env, args.obs_type)
         else:
             env = gymnasium.make(args.env)
         env.reset(seed=seed)
