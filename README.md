@@ -1,8 +1,4 @@
-## ICML 2025 submission
-
-This is the suppliment material for ICML 2025 submission 
-
-**Soft Diffusion Actor-Critic: Efficient Online Reinforcement Learning for Diffusion Policies**
+The diffrep and image-based metaworld parts are still under debugging and refinement.
 
 ## Installation
 
@@ -67,7 +63,4 @@ plot_mean(patterns_dict, env_name, path=logdir)
 ```
 
 
-
-## Disclaimer
-This code is provided specifically for submission purposes. It is not intended for other purposes. 
 

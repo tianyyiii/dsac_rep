@@ -136,7 +136,7 @@ class SDAC(Algorithm):
                 def denoiser(t, x):
                     return self.agent.policy(policy_params, next_obs, x, t)
                 t = jax.random.randint(diffusion_time_key, (next_obs.shape[0],), 0, self.agent.num_timesteps)
-                loss = self.agent.diffusion.weighted_p_loss(diffusion_noise_key, q_weights, denoiser, t,
+                _, _, loss = self.agent.diffusion.weighted_p_loss(diffusion_noise_key, q_weights, denoiser, t,
                                                             jax.lax.stop_gradient(next_action))
 
                 return loss, (q_weights, scaled_q, q_mean, q_std)

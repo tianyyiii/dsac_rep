@@ -23,6 +23,7 @@ __pycache__/
 /metaworld_results/
 
 test*.py
+scripts/inspect_results.py
 
 */.ipynb_checkpoints
 *.png
