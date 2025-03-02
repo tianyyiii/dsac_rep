@@ -34,7 +34,7 @@ def evaluate(env, policy_fn, policy_params, num_episodes, policy_root, render=Fa
             if render and episode_i == 0:
                 frame = env.unwrapped.render(offscreen=True, resolution=(256,256))
                 frames.append(frame)
-            if info["success"]:
+            if "success" in info and info["success"]:
                 terminated = True
                 ep_success += (1 / num_episodes)
             if terminated or truncated:
