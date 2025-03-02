@@ -218,6 +218,32 @@ class ResNetEncoder(hk.Module):
         if x.shape[-1] != self.embedding_dim:
             x = hk.Linear(self.embedding_dim)(x)
         return x
+    
+
+class ConvNetEncoder(hk.Module):
+    def __init__(self, embedding_dim, name=None):
+        super().__init__(name=name)
+
+        self.repr_dim = 32 * 25 * 25
+        
+        self.convnet = hk.Sequential([
+            hk.Conv2D(output_channels=32, kernel_shape=3, stride=2, padding='VALID'),
+            jax.nn.relu,
+            hk.Conv2D(output_channels=32, kernel_shape=3, stride=1, padding='VALID'),
+            jax.nn.relu,
+            hk.Conv2D(output_channels=32, kernel_shape=3, stride=1, padding='VALID'),
+            jax.nn.relu,
+            hk.Conv2D(output_channels=32, kernel_shape=3, stride=1, padding='VALID'),
+            jax.nn.relu,
+        ])
+        self.linear = hk.Linear(embedding_dim)
+
+    def __call__(self, obs):
+        obs = obs / 255.0 - 0.5
+        h = self.convnet(obs)
+        h = jnp.reshape(h, (h.shape[0], -1))
+        h = self.linear(h)
+        return h
 
 
 

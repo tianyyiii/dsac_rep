@@ -6,7 +6,7 @@ import haiku as hk
 import math
 
 from relax.network.blocks import Activation, DistributionalQNet2, DACERPolicyNet, QNet, DiffusionRepPolicyNet, DiffusionRepMuNet
-from relax.network.visual_encoder import ResidualBlock, ResNetEncoder
+from relax.network.visual_encoder import ResidualBlock, ResNetEncoder, ConvNetEncoder
 from relax.network.common import WithSquashedGaussianPolicy
 from relax.utils.diffusion import GaussianDiffusion
 from relax.utils.jax_utils import random_key_from_data
@@ -64,8 +64,10 @@ class DiffRepImageNet:
         act = act + jax.random.normal(noise_key, act.shape) * jnp.exp(log_alpha) * self.noise_scale
         return act
     
-    def get_action_i(self, key: jax.Array, policy_params: hk.Params, encoder_v_params: hk.Params, obs: jax.Array) -> jax.Array:
-        policy_params, log_alpha, q1_params, q2_params = policy_params
+    def get_action_i(self, key: jax.Array, policy_params: hk.Params, obs: jax.Array) -> jax.Array:
+        policy_params, log_alpha, q1_params, q2_params, encoder_v_params = policy_params
+        obs = obs.reshape(obs.shape[0], 64, 64, 6) if len(obs.shape)== 2 else obs.reshape(1, 64, 64, 6)
+        obs = self.encoder_v(encoder_v_params, obs) 
 
         def model_fn(t, x):
             return self.policy(policy_params, obs, x, t)[1]
@@ -99,14 +101,19 @@ class DiffRepImageNet:
         best_action = jax.vmap(slice, (0, 0))(batch_action, max_q_idx)
         return best_action
 
-
-
     def get_deterministic_action(self, policy_params: hk.Params, obs: jax.Array) -> jax.Array:
         key = random_key_from_data(obs)
         policy_params, log_alpha, q1_params, q2_params = policy_params
         log_alpha = -jnp.inf
         policy_params = (policy_params, log_alpha, q1_params, q2_params)
         return self.get_action(key, policy_params, obs)
+    
+    def get_deterministic_action_i(self, policy_params: hk.Params, obs: jax.Array) -> jax.Array:
+        key = random_key_from_data(obs)
+        policy_params, log_alpha, q1_params, q2_params, encoder_v_params = policy_params
+        log_alpha = -jnp.inf
+        policy_params = (policy_params, log_alpha, q1_params, q2_params, encoder_v_params)
+        return self.get_action_i(key, policy_params, obs)
 
     def q_evaluate(
         self, key: jax.Array, q_params: hk.Params, obs: jax.Array, act: jax.Array
@@ -133,7 +140,8 @@ def create_diffrep_image_net(
     q = hk.without_apply_rng(hk.transform(lambda obs, act: QNet(hidden_sizes, activation)(obs, act)))
     policy = hk.without_apply_rng(hk.transform(lambda obs, act, t: DiffusionRepPolicyNet(diffusion_hidden_sizes, activation)(obs, act, t)))
     mu = hk.without_apply_rng(hk.transform(lambda next_obs: DiffusionRepMuNet(diffusion_hidden_sizes, activation)(next_obs)))
-    encoder_v = hk.without_apply_rng(hk.transform(lambda obs: ResNetEncoder(embedding_dim)(obs)))
+    # encoder_v = hk.without_apply_rng(hk.transform(lambda obs: ResNetEncoder(embedding_dim)(obs)))
+    encoder_v = hk.without_apply_rng(hk.transform(lambda obs: ConvNetEncoder(embedding_dim)(obs)))
 
     @jax.jit
     def init(key, obs, act):

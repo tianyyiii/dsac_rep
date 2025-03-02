@@ -11,6 +11,7 @@ from tensorboardX import SummaryWriter
 from tensorboardX.summary import hparams
 
 from relax.algorithm import Algorithm
+from relax.algorithm.diffrep_image import DiffRepImage
 
 from relax.buffer import ExperienceBuffer
 from relax.env.vector import VectorEnv
@@ -84,6 +85,11 @@ class OffPolicyTrainer:
         self.progress = tqdm(total=self.total_step, desc="Sample Step", disable=None, dynamic_ncols=True)
 
         self.algorithm.save_policy_structure(self.log_path, dummy_data.obs[0])
+        if isinstance(self.algorithm, DiffRepImage):
+            obs_type = "image"
+        else:
+            obs_type = "state"
+
         self.evaluator = subprocess.Popen(
             [
                 sys.executable,
@@ -92,6 +98,7 @@ class OffPolicyTrainer:
                 "--env", self.env_name,
                 "--num_episodes", str(self.evaluate_n_episode),
                 "--seed", str(0),
+                "--obs_type", obs_type,
             ],
             stdin=subprocess.PIPE,
             bufsize=0,

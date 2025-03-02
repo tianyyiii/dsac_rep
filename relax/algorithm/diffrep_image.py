@@ -244,13 +244,13 @@ class DiffRepImage(Algorithm):
             }
             return state, info
 
-        self._implement_common_behavior(stateless_update, self.agent.get_action, self.agent.get_deterministic_action)
+        self._implement_common_behavior(stateless_update, self.agent.get_action_i, self.agent.get_deterministic_action_i)
 
     def get_policy_params(self):
-        return (self.state.params.policy, self.state.params.log_alpha, self.state.params.q1, self.state.params.q2 )
+        return (self.state.params.policy, self.state.params.log_alpha, self.state.params.q1, self.state.params.q2, self.state.params.encoder_v)
 
     def get_policy_params_to_save(self):
-        return (self.state.params.target_poicy, self.state.params.log_alpha, self.state.params.q1, self.state.params.q2)
+        return (self.state.params.target_poicy, self.state.params.log_alpha, self.state.params.q1, self.state.params.q2, self.state.params.encoder_v)
 
     def save_policy(self, path: str) -> None:
         policy = jax.device_get(self.get_policy_params_to_save())

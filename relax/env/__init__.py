@@ -76,7 +76,6 @@ class MetaWorldWrapper(Wrapper):
                 self.frames.append(frame)
             obs = np.concatenate(list(self.frames), axis=2)
             obs = obs.reshape(-1)
-        print(obs.shape, "obs shape")
         return obs, {}
 
     def step(self, action):

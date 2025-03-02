@@ -28,6 +28,7 @@ def evaluate(env, policy_fn, policy_params, num_episodes, policy_root, render=Fa
         ep_ret = 0.0
         while True:
             act = policy_fn(policy_params, obs)
+            act = np.squeeze(act)
             obs, reward, terminated, truncated, info = env.step(act)
             ep_len += 1
             ep_ret += reward
@@ -65,11 +66,12 @@ if __name__ == "__main__":
     parser.add_argument("--env", type=str, required=True)
     parser.add_argument("--num_episodes", type=int, required=True)
     parser.add_argument("--seed", type=int, required=True)
+    parser.add_argument("--obs_type", type=str, required=True)
     args = parser.parse_args()
 
     master_rng = np.random.default_rng(args.seed)
     env_seed, env_action_seed, policy_seed = map(int, master_rng.integers(0, 2**32 - 1, 3))
-    env, _, _ = create_env(args.env, env_seed, env_action_seed)
+    env, _, _ = create_env(args.env, env_seed, args.obs_type, env_action_seed)
 
     policy = PersistFunction.load(args.policy_root / "deterministic.pkl")
     @jax.jit
