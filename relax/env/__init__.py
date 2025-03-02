@@ -2,6 +2,7 @@ from collections import deque
 import numpy as np
 from gymnasium import Env, Wrapper, make
 from gymnasium.spaces import Box
+from .dog import DogWrapper
 from metaworld.envs import ALL_V2_ENVIRONMENTS_GOAL_OBSERVABLE
 
 from relax.env.vector import VectorEnv, SerialVectorEnv, GymProcessVectorEnv, PipeProcessVectorEnv, SpinlockProcessVectorEnv, FutexProcessVectorEnv
