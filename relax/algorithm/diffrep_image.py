@@ -92,6 +92,8 @@ class DiffRepImage(Algorithm):
             key: jax.Array, state: DiffRepImageTrainState, data: Experience
         ) -> Tuple[DiffRepImageOptStates, Metric]:
             obs, action, reward, next_obs, done = data.obs, data.action, data.reward, data.next_obs, data.done
+            obs = obs.reshape(obs.shape[0], 64, 64, 6)
+            next_obs = obs.reshape(next_obs.shape[0], 64, 64, 6)
             q1_params, q2_params, target_q1_params, target_q2_params, policy_params, target_policy_params, mu_params, encoder_v_params, log_alpha = state.params
             q1_opt_state, q2_opt_state, policy_opt_state, mu_opt_state, encoder_v_opt_state, log_alpha_opt_state = state.opt_state
             step = state.step
@@ -113,10 +115,12 @@ class DiffRepImage(Algorithm):
                 q2 = self.agent.q(target_q2_params, s, a)
                 q = jnp.minimum(q1, q2)
                 return q
-
-            next_action = self.agent.get_action(next_eval_key, (policy_params, log_alpha, q1_params, q2_params), next_obs)
-            q1_target = self.agent.q(target_q1_params, next_obs, next_action)
-            q2_target = self.agent.q(target_q2_params, next_obs, next_action)
+            
+            # encoded_obs = jax.lax.stop_gradient(self.agent.encoder_v(encoder_v_params, obs))
+            encoded_next_obs = jax.lax.stop_gradient(self.agent.encoder_v(encoder_v_params, next_obs))
+            next_action = self.agent.get_action(next_eval_key, (policy_params, log_alpha, q1_params, q2_params), encoded_next_obs)
+            q1_target = self.agent.q(target_q1_params, encoded_next_obs, next_action)
+            q2_target = self.agent.q(target_q2_params, encoded_next_obs, next_action)
             q_target = jnp.minimum(q1_target, q2_target)  # - jnp.exp(log_alpha) * next_logp
             q_backup = reward + (1 - done) * self.gamma * q_target
 
@@ -129,10 +133,10 @@ class DiffRepImage(Algorithm):
             (q1_loss, q1), (q1_grads, encoder_grad_q1) = jax.value_and_grad(q_loss_fn, argnums=(0, 1), has_aux=True)(q1_params, encoder_v_params)
             (q2_loss, q2), (q2_grads, encoder_grad_q2) = jax.value_and_grad(q_loss_fn, argnums=(0, 1), has_aux=True)(q2_params, encoder_v_params)
 
-            # q1_update, q1_opt_state = self.optim.update(q1_grads, q1_opt_state)
-            # q2_update, q2_opt_state = self.optim.update(q2_grads, q2_opt_state)
-            # q1_params = optax.apply_updates(q1_params, q1_update)
-            # q2_params = optax.apply_updates(q2_params, q2_update)
+            q1_update, q1_opt_state = self.optim.update(q1_grads, q1_opt_state)
+            q2_update, q2_opt_state = self.optim.update(q2_grads, q2_opt_state)
+            q1_params = optax.apply_updates(q1_params, q1_update)
+            q2_params = optax.apply_updates(q2_params, q2_update)
 
 
             def policy_loss_fn(policy_params, mu_params, encoder_v_params: hk.Params) -> jax.Array:
@@ -202,7 +206,7 @@ class DiffRepImage(Algorithm):
             mu_params, mu_opt_state = delay_param_update(self.policy_optim, mu_params, mu_grads, mu_opt_state)
             log_alpha, log_alpha_opt_state = delay_alpha_param_update(self.alpha_optim, log_alpha, log_alpha_opt_state)
 
-            total_encoder_grad = encoder_grad_q1 + encoder_grad_policy
+            total_encoder_grad = jax.tree_util.tree_map(lambda g1, g2: g1 + g2, encoder_grad_q1, encoder_grad_policy)
             encoder_v_params, encoder_v_opt_state = param_update(self.encoder_optim, encoder_v_params, total_encoder_grad, encoder_v_opt_state)
 
             target_q1_params = delay_target_update(q1_params, target_q1_params, self.tau)
@@ -213,8 +217,8 @@ class DiffRepImage(Algorithm):
             new_running_std = running_std + 0.001 * (q_std - running_std)
 
             state = DiffRepImageTrainState(
-                params=DiffRepImageParams(q1_params, q2_params, target_q1_params, target_q2_params, policy_params, target_policy_params, mu_params, log_alpha),
-                opt_state=DiffRepImageOptStates(q1=q1_opt_state, q2=q2_opt_state, policy=policy_opt_state, mu=mu_opt_state, log_alpha=log_alpha_opt_state),
+                params=DiffRepImageParams(q1_params, q2_params, target_q1_params, target_q2_params, policy_params, target_policy_params, mu_params, encoder_v_params, log_alpha),
+                opt_state=DiffRepImageOptStates(q1=q1_opt_state, q2=q2_opt_state, policy=policy_opt_state, mu=mu_opt_state, encoder_v=encoder_v_opt_state, log_alpha=log_alpha_opt_state),
                 step=step + 1,
                 entropy=jnp.float32(0.0),
                 running_mean=new_running_mean,

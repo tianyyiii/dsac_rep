@@ -5,11 +5,13 @@ Encoders more suitable for ViT architectures.
 
 import functools as ft
 from typing import Callable, Sequence, TypeVar, Tuple
+from dataclasses import dataclass
 
 # from flax import linen as nn
 import jax
 import jax.numpy as jnp
 import haiku as hk
+from relax.utils.jax_utils import fix_repr
 
 
 
@@ -153,6 +155,8 @@ def max_pool(x: jnp.ndarray, kernel_shape: Tuple[int, int], strides: Tuple[int, 
     stride_shape = (1,) + strides + (1,)
     return jax.lax.reduce_window(x, -jnp.inf, jax.lax.max, window_shape, stride_shape, padding)
 
+@dataclass
+@fix_repr
 class ResidualBlock(hk.Module):
     def __init__(self, filters: int, strides: Tuple[int, int] = (1, 1), name: str = None):
         super().__init__(name=name)
@@ -166,24 +170,26 @@ class ResidualBlock(hk.Module):
                       kernel_shape=3,
                       stride=self.strides,
                       padding="SAME")(x)
-        x = hk.BatchNorm(create_scale=True, create_offset=True, decay_rate=0.9)(x, is_training=is_training)
+        x = hk.LayerNorm(axis=[-1], create_scale=True, create_offset=True)(x)
         x = jax.nn.relu(x)
 
         x = hk.Conv2D(output_channels=self.filters,
                       kernel_shape=3,
                       stride=1,
                       padding="SAME")(x)
-        x = hk.BatchNorm(create_scale=True, create_offset=True, decay_rate=0.9)(x, is_training=is_training)
+        x = hk.LayerNorm(axis=[-1], create_scale=True, create_offset=True)(x)
 
         if residual.shape != x.shape:
             residual = hk.Conv2D(output_channels=self.filters,
                                  kernel_shape=1,
                                  stride=self.strides,
                                  padding="SAME")(residual)
-            residual = hk.BatchNorm(create_scale=True, create_offset=True, decay_rate=0.9)(residual, is_training=is_training)
+            residual = hk.LayerNorm(axis=[-1], create_scale=True, create_offset=True)(residual)
 
         return jax.nn.relu(x + residual)
 
+@dataclass
+@fix_repr
 class ResNetEncoder(hk.Module):
     def __init__(self, embedding_dim: int = 256, name: str = None):
         super().__init__(name=name)
@@ -194,9 +200,10 @@ class ResNetEncoder(hk.Module):
                       kernel_shape=7,
                       stride=2,
                       padding="SAME")(x)
-        x = hk.BatchNorm(create_scale=True, create_offset=True, decay_rate=0.9)(x, is_training=is_training)
+        x = hk.LayerNorm(axis=[-1], create_scale=True, create_offset=True)(x)
         x = jax.nn.relu(x)
-        x = max_pool(x, (3, 3), (2, 2), 'SAME')
+
+        x = hk.avg_pool(x, window_shape=(3, 3), strides=(2, 2), padding="SAME")
 
         x = ResidualBlock(64, strides=(1, 1))(x, is_training=is_training)
         x = ResidualBlock(64, strides=(1, 1))(x, is_training=is_training)
@@ -211,6 +218,7 @@ class ResNetEncoder(hk.Module):
         if x.shape[-1] != self.embedding_dim:
             x = hk.Linear(self.embedding_dim)(x)
         return x
+
 
 
 

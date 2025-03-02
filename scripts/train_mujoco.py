@@ -72,10 +72,15 @@ if __name__ == "__main__":
     train_key = jax.random.key(train_seed)
     del init_network_seed, train_seed
 
-    if args.num_vec_envs > 0:
-        env, obs_dim, act_dim = create_vector_env(args.env, args.num_vec_envs, env_seed, env_action_seed, mode="futex")
+    if "image" in args.alg:
+        obs_type = "image"
     else:
-        env, obs_dim, act_dim = create_env(args.env, env_seed, env_action_seed)
+        obs_type = "state"
+
+    if args.num_vec_envs > 0:
+        env, obs_dim, act_dim = create_vector_env(args.env, args.num_vec_envs, env_seed, env_action_seed, obs_type=obs_type, mode="futex")
+    else:
+        env, obs_dim, act_dim = create_env(args.env, env_seed, env_action_seed, obs_type=obs_type)
     eval_env = None
 
     hidden_sizes = [args.hidden_dim] * args.hidden_num

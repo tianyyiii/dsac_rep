@@ -63,6 +63,30 @@ class DiffRepImageNet:
             act = jnp.take_along_axis(acts, q_best_ind[..., None], axis=0).squeeze(axis=0)
         act = act + jax.random.normal(noise_key, act.shape) * jnp.exp(log_alpha) * self.noise_scale
         return act
+    
+    def get_action_i(self, key: jax.Array, policy_params: hk.Params, encoder_v_params: hk.Params, obs: jax.Array) -> jax.Array:
+        policy_params, log_alpha, q1_params, q2_params = policy_params
+
+        def model_fn(t, x):
+            return self.policy(policy_params, obs, x, t)[1]
+
+        def sample(key: jax.Array) -> Union[jax.Array, jax.Array]:
+            act = self.diffusion.p_sample(key, model_fn, (*obs.shape[:-1], self.act_dim))
+            q1 = self.q(q1_params, obs, act)
+            q2 = self.q(q2_params, obs, act)
+            q = jnp.minimum(q1, q2)
+            return act.clip(-1, 1), q
+
+        key, noise_key = jax.random.split(key)
+        if self.num_particles == 1:
+            act = sample(key)
+        else:
+            keys = jax.random.split(key, self.num_particles)
+            acts, qs = jax.vmap(sample)(keys)
+            q_best_ind = jnp.argmax(qs, axis=0, keepdims=True)
+            act = jnp.take_along_axis(acts, q_best_ind[..., None], axis=0).squeeze(axis=0)
+        act = act + jax.random.normal(noise_key, act.shape) * jnp.exp(log_alpha) * self.noise_scale
+        return act
 
     def get_batch_actions(self, key: jax.Array, policy_params: hk.Params, obs: jax.Array, q_func: Callable) -> jax.Array:
         batch_flatten_obs = obs.repeat(self.num_particles, axis=0)
@@ -115,6 +139,7 @@ def create_diffrep_image_net(
     def init(key, obs, act):
         q1_key, q2_key, policy_key, mu_key, encoder_v_key = jax.random.split(key, 5)
         encoder_v_params = encoder_v.init(encoder_v_key, obs)
+        obs = encoder_v.apply(encoder_v_params, obs)
         q1_params = q.init(q1_key, obs, act)
         q2_params = q.init(q2_key, obs, act)
         target_q1_params = q1_params
@@ -127,6 +152,7 @@ def create_diffrep_image_net(
 
     sample_obs = jnp.zeros((1, obs_dim))
     sample_act = jnp.zeros((1, act_dim))
+    sample_obs = sample_obs.reshape(1, 64, 64, 6)
     params = init(key, sample_obs, sample_act)
 
     net = DiffRepImageNet(q=q.apply, policy=policy.apply, mu=mu.apply, encoder_v=encoder_v.apply, num_timesteps=num_timesteps, act_dim=act_dim, 

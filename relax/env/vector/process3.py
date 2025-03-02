@@ -3,18 +3,68 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from collections import deque
 from multiprocessing.shared_memory import SharedMemory
 
 import gymnasium
+from gymnasium import Wrapper
 from gymnasium.spaces import Box
+
 import numpy as np
 from metaworld.envs import ALL_V2_ENVIRONMENTS_GOAL_OBSERVABLE
 
 from relax.env.vector.base import VectorEnv
-# from relax.env import MetaWorldWrapper
 from relax.futex import futex_server_wait, futex_server_notify
 
 WORKER_PATH = Path(__file__).parent / "worker3.py"
+
+class MetaWorldWrapper(Wrapper):
+    def __init__(self, env, obs_type="state", n_stack=2, max_episode_steps=500):
+        self.env = env
+        self.obs_type = obs_type
+        if self.obs_type == "image":
+            self.observation_space = Box(low=0, high=255, shape=(64 * 64 * 3 * n_stack,), dtype=np.uint8)
+        else:
+            self.observation_space = self.env.observation_space
+        self.action_space = self.env.action_space
+        self.n_stack = n_stack
+        self.frames = deque(maxlen=n_stack)
+        self.env._freeze_rand_vec = False
+        self._max_episode_steps = max_episode_steps
+        self._t = 0
+
+    def reset(self, **kwargs):
+        obs = self.env.reset()
+        self._t = 0
+        if self.obs_type == "image":
+            frame = self.env.render(offscreen=True, resolution=(64,64))
+            for _ in range(self.n_stack):
+                self.frames.append(frame)
+            obs = np.concatenate(list(self.frames), axis=2)
+            obs = obs.reshape(-1)
+        print(obs.shape, "obs shape")
+        return obs, {}
+
+    def step(self, action):
+        total_reward = 0
+        for _ in range(2):
+            obs, reward, done, info = self.env.step(action.copy())
+            total_reward += reward
+            self._t += 1
+        if self.obs_type == "image":
+            frame = self.env.render(offscreen=True, resolution=(64, 64))
+            self.frames.append(frame)
+            obs = np.concatenate(list(self.frames), axis=2)
+            obs = obs.reshape(-1)
+        else:
+            obs = obs.astype(np.float32)
+        terminated = False
+        truncated = (self._t >= self._max_episode_steps)
+        return obs, total_reward, terminated, truncated, info
+
+    @property
+    def unwrapped(self):
+        return self.env.unwrapped
 
 class ProcessVectorEnv(VectorEnv):
     def __init__(self, name: str, num_envs: int, seed: int, obs_type: str, *, num_workers: int = None):
@@ -28,7 +78,7 @@ class ProcessVectorEnv(VectorEnv):
 
         if "metaworld" in name:
             dummy_env = ALL_V2_ENVIRONMENTS_GOAL_OBSERVABLE[name.split("/")[1]](seed=seed)
-            # dummy_env = MetaWorldWrapper(dummy_env, obs_type)
+            dummy_env = MetaWorldWrapper(dummy_env, obs_type)
         else:
             dummy_env = gymnasium.make(name)
 

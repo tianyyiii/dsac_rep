@@ -11,6 +11,7 @@ from tensorboardX import SummaryWriter
 from tensorboardX.summary import hparams
 
 from relax.algorithm import Algorithm
+
 from relax.buffer import ExperienceBuffer
 from relax.env.vector import VectorEnv
 from relax.trainer.accumulator import SampleLog, VectorSampleLog, UpdateLog, Interval
@@ -160,6 +161,7 @@ class OffPolicyTrainer:
         key, warmup_key = jax.random.split(key)
 
         obs, _ = self.env.reset()
+
         obs = self.warmup(warmup_key, obs)
 
         iter_key_fn = create_iter_key_fn(key, self.sample_per_iteration, self.update_per_iteration)

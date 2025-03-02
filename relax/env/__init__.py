@@ -57,7 +57,7 @@ class MetaWorldWrapper(Wrapper):
         self.env = env
         self.obs_type = obs_type
         if self.obs_type == "image":
-            self.observation_space = Box(low=0, high=255, shape=(64, 64, 3 * n_stack), dtype=np.uint8)
+            self.observation_space = Box(low=0, high=255, shape=(64 * 64 * 3 * n_stack,), dtype=np.uint8)
         else:
             self.observation_space = self.env.observation_space
         self.action_space = self.env.action_space
@@ -75,6 +75,8 @@ class MetaWorldWrapper(Wrapper):
             for _ in range(self.n_stack):
                 self.frames.append(frame)
             obs = np.concatenate(list(self.frames), axis=2)
+            obs = obs.reshape(-1)
+        print(obs.shape, "obs shape")
         return obs, {}
 
     def step(self, action):
@@ -87,6 +89,7 @@ class MetaWorldWrapper(Wrapper):
             frame = self.env.render(offscreen=True, resolution=(64, 64))
             self.frames.append(frame)
             obs = np.concatenate(list(self.frames), axis=2)
+            obs = obs.reshape(-1)
         else:
             obs = obs.astype(np.float32)
         terminated = False
