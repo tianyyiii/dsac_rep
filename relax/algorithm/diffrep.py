@@ -10,6 +10,7 @@ from relax.algorithm.base import Algorithm
 from relax.network.dacer import DACERNet, DACERParams
 from relax.network.diffrep import DiffRepNet, DiffRepParams
 from relax.utils.experience import Experience
+from functools import partial
 from relax.utils.typing import Metric
 
 
@@ -47,6 +48,7 @@ class DiffRep(Algorithm):
         num_samples: int = 200,
         use_ema: bool = True,
         rep_weight: float = 1.0,
+        use_rff_critics: bool = False,
     ):
         self.agent = agent
         self.gamma = gamma
@@ -72,6 +74,7 @@ class DiffRep(Algorithm):
         self.mu_optim = optax.adam(learning_rate=lr_schedule_mu)
         self.alpha_optim = optax.adam(alpha_lr)
         self.entropy = 0.0
+        self.use_rff_critics = use_rff_critics
 
         self.state = DiffRepTrainState(
             params=params,
@@ -110,24 +113,32 @@ class DiffRep(Algorithm):
                 q2 = self.agent.q(q2_params, s, a)
                 q = jnp.minimum(q1, q2)
                 return q
-
-            def get_min_target_q(s, a):
-                q1 = self.agent.q(target_q1_params, s, a)
-                q2 = self.agent.q(target_q2_params, s, a)
+            
+            def get_min_q_rff(rep):
+                q1 = self.agent.q(q1_params, rep)
+                q2 = self.agent.q(q2_params, rep)
                 q = jnp.minimum(q1, q2)
                 return q
 
-            next_action = self.agent.get_action(next_eval_key, (policy_params, log_alpha, q1_params, q2_params), next_obs)
-            q1_target = self.agent.q(target_q1_params, next_obs, next_action)
-            q2_target = self.agent.q(target_q2_params, next_obs, next_action)
+            if self.use_rff_critics:
+                next_action, next_rep = self.agent.get_action(next_eval_key, (policy_params, log_alpha, q1_params, q2_params), next_obs, return_rep=True)
+                q1_target = self.agent.q(target_q1_params, next_rep)
+                q2_target = self.agent.q(target_q2_params, next_rep)
+            else:
+                next_action = self.agent.get_action(next_eval_key, (policy_params, log_alpha, q1_params, q2_params), next_obs)
+                q1_target = self.agent.q(target_q1_params, next_obs, next_action)
+                q2_target = self.agent.q(target_q2_params, next_obs, next_action)
             q_target = jnp.minimum(q1_target, q2_target)  # - jnp.exp(log_alpha) * next_logp
             q_backup = reward + (1 - done) * self.gamma * q_target
-
+            
             def q_loss_fn(q_params: hk.Params) -> jax.Array:
-                q = self.agent.q(q_params, obs, action)
+                if self.use_rff_critics:
+                    q = self.agent.q(q_params, data.representation)
+                else:
+                    q = self.agent.q(q_params, obs, action)
                 q_loss = jnp.mean((q - q_backup) ** 2)
                 return q_loss, q
-
+            
             (q1_loss, q1), q1_grads = jax.value_and_grad(q_loss_fn, has_aux=True)(q1_params)
             (q2_loss, q2), q2_grads = jax.value_and_grad(q_loss_fn, has_aux=True)(q2_params)
             q1_update, q1_opt_state = self.optim.update(q1_grads, q1_opt_state)
@@ -137,18 +148,23 @@ class DiffRep(Algorithm):
 
 
             def policy_loss_fn(policy_params, mu_params) -> jax.Array:
-                q_min = get_min_q(next_obs, next_action)
+                if self.use_rff_critics:
+                    q_min = get_min_q_rff(next_rep)
+                else:
+                    q_min = get_min_q(next_obs, next_action)
+
                 q_mean, q_std = q_min.mean(), q_min.std()
                 norm_q = q_min - running_mean / running_std
                 scaled_q = norm_q.clip(-3., 3.) / jnp.exp(log_alpha)
                 q_weights = jnp.exp(scaled_q)
-                def denoiser(t, x):
-                    return self.agent.policy(policy_params, next_obs, x, t)[1]
                 t = jax.random.randint(diffusion_time_key, (next_obs.shape[0],), 0, self.agent.num_timesteps)
-                noise, x_noisy, loss = self.agent.diffusion.weighted_p_loss(diffusion_noise_key, q_weights, denoiser, t,
-                                                            jax.lax.stop_gradient(next_action))
+
+                # compute the weighted loss manually to circumvent applying forward twice
+                noise = jax.random.normal(key, next_action.shape)
+                next_action_noisy = jax.vmap(self.agent.diffusion.q_sample)(t, jax.lax.stop_gradient(next_action), noise)
+                phi_output, noise_pred = self.agent.policy(policy_params, next_obs, next_action_noisy, t)
+                loss = (q_weights[:, None] * optax.squared_error(noise_pred, noise)).mean()
                 
-                phi_output = self.agent.policy(policy_params, obs, x_noisy, t)[0]
                 mu_output = self.agent.mu(mu_params, next_obs)
                 mul = jnp.matmul(phi_output, mu_output[..., None])
                 mul = mul.squeeze(-1)
@@ -236,7 +252,8 @@ class DiffRep(Algorithm):
             }
             return state, info
 
-        self._implement_common_behavior(stateless_update, self.agent.get_action, self.agent.get_deterministic_action)
+        get_action = partial(self.agent.get_action, return_rep=True) if self.use_rff_critics else self.agent.get_action
+        self._implement_common_behavior(stateless_update, get_action, self.agent.get_deterministic_action)
 
     def get_policy_params(self):
         return (self.state.params.policy, self.state.params.log_alpha, self.state.params.q1, self.state.params.q2 )
@@ -250,5 +267,9 @@ class DiffRep(Algorithm):
             pickle.dump(policy, f)
 
     def get_action(self, key: jax.Array, obs: np.ndarray) -> np.ndarray:
-        action = self._get_action(key, self.get_policy_params_to_save(), obs)
-        return np.asarray(action)
+        if self.use_rff_critics:
+            action, representation = self._get_action(key, self.get_policy_params_to_save(), obs)
+            return np.asarray(action), np.asarray(representation)
+        else:
+            action = self._get_action(key, self.get_policy_params_to_save(), obs)
+            return np.asarray(action)

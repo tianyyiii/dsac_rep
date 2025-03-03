@@ -36,6 +36,24 @@ class QNet(hk.Module):
     def __call__(self, obs: jax.Array, act: jax.Array) -> jax.Array:
         input = jnp.concatenate((obs, act), axis=-1)
         return mlp(self.hidden_sizes, 1, self.activation, self.output_activation, squeeze_output=True)(input)
+    
+
+@dataclass
+@fix_repr
+class RFFQNet(hk.Module):
+    hidden_sizes: Sequence[int]
+    activation: Activation
+    output_activation: Activation = Identity
+    name: str = None
+
+    # TODO: Maybe add regularization later, also use sin as intermediate activation?
+    def __call__(self, rep: jax.Array) -> jax.Array:
+        if rep.ndim > 2:
+            rep = rep.reshape((*rep.shape[:-2], -1))
+        else:
+            rep = rep.flatten()
+        out = mlp(self.hidden_sizes, 1, self.activation, self.output_activation, squeeze_output=True)(rep)
+        return out
 
 
 @dataclass

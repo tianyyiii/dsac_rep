@@ -26,7 +26,7 @@ from relax.network.diffrep_image import create_diffrep_image_net
 from relax.network.qvpo import create_qvpo_net
 from relax.trainer.off_policy import OffPolicyTrainer
 from relax.env import create_env, create_vector_env
-from relax.utils.experience import Experience, ObsActionPair
+from relax.utils.experience import Experience, ObsActionPair, RepresentationExperience
 from relax.utils.fs import PROJECT_ROOT
 from relax.utils.random_utils import seeding
 from relax.utils.log_diff import log_git_details
@@ -43,6 +43,7 @@ if __name__ == "__main__":
     parser.add_argument("--diffusion_hidden_num", type=int, default=3)
     parser.add_argument("--diffusion_hidden_dim", type=int, default=256)
     parser.add_argument("--visual_embedding_dim", type=int, default=64)
+    parser.add_argument("--rep_embedding_dim", type=int, default=256)
     parser.add_argument("--start_step", type=int, default=int(3e4)) # other envs 3e4
     parser.add_argument("--total_step", type=int, default=int(2e6)) #1e6
     parser.add_argument("--update_per_iteration", type=int, default=1)
@@ -57,6 +58,8 @@ if __name__ == "__main__":
     parser.add_argument("--debug", action='store_true', default=False)
     parser.add_argument("--rep_weight", type=float, default=0.0)
     parser.add_argument("--use_ema_policy", default=True, action="store_true")
+    parser.add_argument("--use_rff_critics", default=False, action="store_true")
+    parser.add_argument("--warmup_with", type=str, default="random")
     args = parser.parse_args()
 
     if args.debug:
@@ -81,8 +84,6 @@ if __name__ == "__main__":
     hidden_sizes = [args.hidden_dim] * args.hidden_num
     diffusion_hidden_sizes = [args.diffusion_hidden_dim] * args.diffusion_hidden_num
 
-    buffer = TreeBuffer.from_experience(obs_dim, act_dim, size=int(1e6), seed=buffer_seed)
-
     gelu = partial(jax.nn.gelu, approximate=False)
 
     if args.alg == 'sdac':
@@ -100,15 +101,21 @@ if __name__ == "__main__":
     elif args.alg == 'diffrep':
         def mish(x: jax.Array):
             return x * jnp.tanh(jax.nn.softplus(x))
+        if args.use_rff_critics:
+            print('Setting warmup with to policy!')
+            args.warmup_with = "policy"
+
         agent, params = create_diffrep_net(init_network_key, obs_dim, act_dim, hidden_sizes, diffusion_hidden_sizes, mish,
                                           num_timesteps=args.diffusion_steps, 
                                           num_particles=args.num_particles, 
                                           noise_scale=args.noise_scale,
-                                          target_entropy_scale=args.target_entropy_scale)
+                                          target_entropy_scale=args.target_entropy_scale,
+                                            rep_embedding_dim=args.rep_embedding_dim,
+                                           use_rff_critics=args.use_rff_critics)
         algorithm = DiffRep(agent, params, lr=args.lr, alpha_lr=args.alpha_lr, 
                            delay_alpha_update=args.delay_alpha_update,
                              lr_schedule_end=args.lr_schedule_end,
-                             use_ema=args.use_ema_policy, rep_weight=args.rep_weight)
+                            use_ema=args.use_ema_policy, rep_weight=args.rep_weight, use_rff_critics=args.use_rff_critics)
         
     elif args.alg == 'diffrep_image':
         def mish(x: jax.Array):
@@ -161,6 +168,16 @@ if __name__ == "__main__":
         raise ValueError(f"Invalid algorithm {args.alg}!")
 
     exp_dir = PROJECT_ROOT / "logs" / args.env / (args.alg + '_' + time.strftime("%Y-%m-%d_%H-%M-%S") + f'_s{args.seed}_{args.suffix}')
+    if isinstance(algorithm, DiffRep) and algorithm.use_rff_critics:
+        exp = RepresentationExperience.create_example(
+            obs_dim, act_dim, args.rep_embedding_dim, batch_size=1)
+        buffer = TreeBuffer.from_example(
+            exp, args.total_step, buffer_seed, remove_batch_dim=True)
+    else:
+        exp = Experience.create_example(obs_dim, act_dim, batch_size=1)
+        buffer = TreeBuffer.from_experience(
+            obs_dim, act_dim, size=int(1e6), seed=buffer_seed)
+
     trainer = OffPolicyTrainer(
         env=env,
         env_name=args.env,
@@ -172,11 +189,11 @@ if __name__ == "__main__":
         update_per_iteration=args.update_per_iteration,
         evaluate_env=eval_env,
         save_policy_every=int(args.total_step / 40),
-        warmup_with="random",
+        warmup_with=args.warmup_with,
         log_path=exp_dir,
     )
-
-    trainer.setup(Experience.create_example(obs_dim, act_dim, trainer.batch_size))
+    
+    trainer.setup(exp)
     log_git_details(log_file=os.path.join(exp_dir, 'git.diff'))
     
     # Save the arguments to a YAML file

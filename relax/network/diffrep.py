@@ -5,7 +5,7 @@ import jax, jax.numpy as jnp
 import haiku as hk
 import math
 
-from relax.network.blocks import Activation, DistributionalQNet2, DACERPolicyNet, QNet, DiffusionRepPolicyNet, DiffusionRepMuNet
+from relax.network.blocks import Activation, DistributionalQNet2, RFFQNet, QNet, DiffusionRepPolicyNet, DiffusionRepMuNet
 from relax.network.common import WithSquashedGaussianPolicy
 from relax.utils.diffusion import GaussianDiffusion
 from relax.utils.jax_utils import random_key_from_data
@@ -32,21 +32,28 @@ class DiffRepNet:
     target_entropy: float
     noise_scale: float
     noise_schedule: str
+    rep_embedding_dim: int
+    use_rff_critics: bool
 
     @property
     def diffusion(self) -> GaussianDiffusion:
         return GaussianDiffusion(self.num_timesteps, self.noise_schedule)
 
-    def get_action(self, key: jax.Array, policy_params: hk.Params, obs: jax.Array) -> jax.Array:
+    def get_action(self, key: jax.Array, policy_params: hk.Params, obs: jax.Array, return_rep: bool = False) -> jax.Array:
         policy_params, log_alpha, q1_params, q2_params = policy_params
 
         def model_fn(t, x):
-            return self.policy(policy_params, obs, x, t)[1]
+            return self.policy(policy_params, obs, x, t)
 
         def sample(key: jax.Array) -> Union[jax.Array, jax.Array]:
-            act = self.diffusion.p_sample(key, model_fn, (*obs.shape[:-1], self.act_dim))
-            q1 = self.q(q1_params, obs, act)
-            q2 = self.q(q2_params, obs, act)
+            act, phi_output = self.diffusion.p_sample_with_aux(
+                key, model_fn, (*obs.shape[:-1], self.act_dim), (*obs.shape[:-1], self.act_dim, self.rep_embedding_dim))
+            if self.use_rff_critics:
+                q1 = self.q(q1_params, phi_output)
+                q2 = self.q(q2_params, phi_output)
+            else:
+                q1 = self.q(q1_params, obs, act)
+                q2 = self.q(q2_params, obs, act)
             q = jnp.minimum(q1, q2)
             return act.clip(-1, 1), q
 
@@ -59,6 +66,10 @@ class DiffRepNet:
             q_best_ind = jnp.argmax(qs, axis=0, keepdims=True)
             act = jnp.take_along_axis(acts, q_best_ind[..., None], axis=0).squeeze(axis=0)
         act = act + jax.random.normal(noise_key, act.shape) * jnp.exp(log_alpha) * self.noise_scale
+        if return_rep:
+            # selecting t=0
+            rep = self.policy(policy_params, obs, act, t=0)[0]
+            return act, rep
         return act
 
     def get_batch_actions(self, key: jax.Array, policy_params: hk.Params, obs: jax.Array, q_func: Callable) -> jax.Array:
@@ -71,8 +82,6 @@ class DiffRepNet:
         # action: batch_size, repeat_size, idx: batch_size
         best_action = jax.vmap(slice, (0, 0))(batch_action, max_q_idx)
         return best_action
-
-
 
     def get_deterministic_action(self, policy_params: hk.Params, obs: jax.Array) -> jax.Array:
         key = random_key_from_data(obs)
@@ -97,20 +106,30 @@ def create_diffrep_net(
     hidden_sizes: Sequence[int],
     diffusion_hidden_sizes: Sequence[int],
     activation: Activation = jax.nn.relu,
+    rep_embedding_dim: int = 256,
     num_timesteps: int = 20,
     num_particles: int = 32,
     noise_scale: float = 0.05,
     target_entropy_scale = 0.9,
+    use_rff_critics: bool = False,
     ) -> Tuple[DiffRepNet, DiffRepParams]:
-    q = hk.without_apply_rng(hk.transform(lambda obs, act: QNet(hidden_sizes, activation)(obs, act)))
-    policy = hk.without_apply_rng(hk.transform(lambda obs, act, t: DiffusionRepPolicyNet(diffusion_hidden_sizes, activation)(obs, act, t)))
+    if use_rff_critics:
+        q = hk.without_apply_rng(hk.transform(lambda rep: RFFQNet(hidden_sizes, activation)(rep)))
+    else:
+        q = hk.without_apply_rng(hk.transform(lambda obs, act: QNet(hidden_sizes, activation)(obs, act)))
+    policy = hk.without_apply_rng(hk.transform(lambda obs, act, t: DiffusionRepPolicyNet(
+        diffusion_hidden_sizes, activation, embedding_dim=rep_embedding_dim)(obs, act, t)))
     mu = hk.without_apply_rng(hk.transform(lambda next_obs: DiffusionRepMuNet(diffusion_hidden_sizes, activation)(next_obs)))
 
     @jax.jit
     def init(key, obs, act):
         q1_key, q2_key, policy_key, mu_key = jax.random.split(key, 4)
-        q1_params = q.init(q1_key, obs, act)
-        q2_params = q.init(q2_key, obs, act)
+        if use_rff_critics:
+            q1_params = q.init(q1_key, jnp.zeros((1, act_dim, rep_embedding_dim)))
+            q2_params = q.init(q2_key, jnp.zeros((1, act_dim, rep_embedding_dim)))
+        else:
+            q1_params = q.init(q1_key, obs, act)
+            q2_params = q.init(q2_key, obs, act)
         target_q1_params = q1_params
         target_q2_params = q2_params
         policy_params = policy.init(policy_key, obs, act, 0)
@@ -125,5 +144,5 @@ def create_diffrep_net(
 
     net = DiffRepNet(q=q.apply, policy=policy.apply, mu=mu.apply, num_timesteps=num_timesteps, act_dim=act_dim, 
                     target_entropy=-act_dim*target_entropy_scale, num_particles=num_particles, noise_scale=noise_scale,
-                    noise_schedule='linear')
+                     noise_schedule='linear', rep_embedding_dim=rep_embedding_dim, use_rff_critics=use_rff_critics)
     return net, params

@@ -41,6 +41,38 @@ class Experience(NamedTuple):
     @staticmethod
     def create(obs, action, reward, terminated, truncated, next_obs, info=None):
         return Experience(obs=obs, action=action, reward=reward, done=terminated, next_obs=next_obs)
+    
+class RepresentationExperience(NamedTuple):
+    obs: "jax.Array"
+    action: "jax.Array"
+    representation: "jax.Array"
+    reward: "jax.Array"
+    done: "jax.Array"
+    next_obs: "jax.Array"
+
+    def batch_size(self) -> Optional[int]:
+        return probe_batch_size(self.reward)
+
+    def __repr__(self):
+        return f"RepresentationExperience(size={self.batch_size()})"
+
+    @staticmethod
+    def create_example(obs_dim: int, action_dim: int, rep_dim:int, batch_size: Optional[int] = None):
+        leading_dims = (batch_size,) if batch_size is not None else ()
+        return RepresentationExperience(
+            obs=np.zeros((*leading_dims, obs_dim), dtype=np.float32),
+            action=np.zeros((*leading_dims, action_dim), dtype=np.float32),
+            representation=np.zeros((*leading_dims, action_dim, rep_dim), dtype=np.float32),
+            reward=np.zeros(leading_dims, dtype=np.float32),
+            next_obs=np.zeros((*leading_dims, obs_dim), dtype=np.float32),
+            done=np.zeros(leading_dims, dtype=np.bool_),
+        )
+
+    @staticmethod
+    def create(obs, action, representation, reward, terminated, truncated, next_obs, info=None):
+        return RepresentationExperience(obs=obs, action=action, representation=representation, reward=reward, done=terminated, next_obs=next_obs)
+
+
 
 class GAEExperience(NamedTuple):
     obs: "jax.Array"

@@ -14,7 +14,8 @@ from relax.algorithm import Algorithm
 from relax.buffer import ExperienceBuffer
 from relax.env.vector import VectorEnv
 from relax.trainer.accumulator import SampleLog, VectorSampleLog, UpdateLog, Interval
-from relax.utils.experience import Experience
+from relax.utils.experience import Experience, RepresentationExperience
+from relax.algorithm.diffrep import DiffRep
 
 
 class OffPolicyTrainer:
@@ -104,12 +105,18 @@ class OffPolicyTrainer:
             if self.warmup_with == "random":
                 action = self.env.action_space.sample()
             elif self.warmup_with == "policy":
-                action = self.algorithm.get_action(key_fn(step), obs)
+                if isinstance(self.algorithm, DiffRep) and self.algorithm.use_rff_critics:
+                    action, representation = self.algorithm.get_action(key_fn(step), obs)
+                else:
+                    action = self.algorithm.get_action(key_fn(step), obs)
             else:
                 raise ValueError(f"Invalid warmup_with {self.warmup_with}!")
             next_obs, reward, terminated, truncated, info = self.env.step(action)
 
-            experience = Experience.create(obs, action, reward, terminated, truncated, next_obs, info)
+            if isinstance(self.algorithm, DiffRep) and self.algorithm.use_rff_critics:
+                experience = RepresentationExperience.create(obs, action, representation, reward, terminated, truncated, next_obs, info)
+            else:
+                experience = Experience.create(obs, action, reward, terminated, truncated, next_obs, info)
             if self.is_vec:
                 self.buffer.add_batch(experience)
             else:
@@ -124,10 +131,16 @@ class OffPolicyTrainer:
     def sample(self, sample_key: jax.Array, obs: np.ndarray):
         sl = self.sample_log
 
-        action = self.algorithm.get_action(sample_key, obs)
+        if isinstance(self.algorithm, DiffRep) and self.algorithm.use_rff_critics:
+            action, representation = self.algorithm.get_action(sample_key, obs)
+        else:
+            action = self.algorithm.get_action(sample_key, obs)
         next_obs, reward, terminated, truncated, info = self.env.step(action)
 
-        experience = Experience.create(obs, action, reward, terminated, truncated, next_obs, info)
+        if isinstance(self.algorithm, DiffRep) and self.algorithm.use_rff_critics:
+            experience = RepresentationExperience.create(obs, action, representation, reward, terminated, truncated, next_obs, info)
+        else:
+            experience = Experience.create(obs, action, reward, terminated, truncated, next_obs, info)
         if self.is_vec:
             self.buffer.add_batch(experience)
         else:
