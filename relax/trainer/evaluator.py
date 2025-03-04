@@ -12,7 +12,6 @@ import imageio
 
 import numpy as np
 import jax
-from tensorboardX import SummaryWriter
 
 from relax.env import create_env
 from relax.utils.persistence import PersistFunction
@@ -76,7 +75,6 @@ if __name__ == "__main__":
     def policy_fn(policy_params, obs):
         return policy(policy_params, obs).clip(-1, 1)
 
-    # logger = SummaryWriter(args.policy_root)
     logger = Logger(args.policy_root)
 
     while payload := sys.stdin.readline():

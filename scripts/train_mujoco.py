@@ -11,6 +11,7 @@ from relax.algorithm.sac import SAC
 from relax.algorithm.dacer import DACER
 from relax.algorithm.qsm import QSM
 from relax.algorithm.dipo import DIPO
+import wandb
 from relax.algorithm.qvpo import QVPO
 from relax.algorithm.sdac import SDAC
 from relax.algorithm.diffrep import DiffRep
@@ -37,16 +38,17 @@ if __name__ == "__main__":
     parser.add_argument("--env", type=str, default="Ant-v4")
     parser.add_argument("--suffix", type=str, default="test_use_atp1")
     parser.add_argument("--num_vec_envs", type=int, default=5)
+
     parser.add_argument("--hidden_num", type=int, default=3)
-    parser.add_argument("--hidden_dim", type=int, default=256)
-    parser.add_argument("--diffusion_steps", type=int, default=20)
+    parser.add_argument("--hidden_dim", type=int, default=512)
     parser.add_argument("--diffusion_hidden_num", type=int, default=3)
-    parser.add_argument("--diffusion_hidden_dim", type=int, default=256)
-    parser.add_argument("--visual_embedding_dim", type=int, default=64)
-    parser.add_argument("--rep_embedding_dim", type=int, default=256)
+    parser.add_argument("--diffusion_hidden_dim", type=int, default=512)
+    parser.add_argument("--rep_embedding_dim", type=int, default=256) # this is multiplied by nu!
+    
+    parser.add_argument("--diffusion_steps", type=int, default=20)
     parser.add_argument("--start_step", type=int, default=int(3e4)) # other envs 3e4
     parser.add_argument("--total_step", type=int, default=int(2e6)) #1e6
-    parser.add_argument("--update_per_iteration", type=int, default=1)
+    parser.add_argument("--update_per_iteration", type=int, default=5)
     parser.add_argument("--lr", type=float, default=3e-4)
     parser.add_argument("--lr_schedule_end", type=float, default=3e-5)
     parser.add_argument("--alpha_lr", type=float, default=7e-3)
@@ -59,6 +61,7 @@ if __name__ == "__main__":
     parser.add_argument("--rep_weight", type=float, default=0.0)
     parser.add_argument("--use_ema_policy", default=True, action="store_true")
     parser.add_argument("--use_rff_critics", default=False, action="store_true")
+    parser.add_argument("--use_wandb",default=False, action="store_true")
     parser.add_argument("--warmup_with", type=str, default="random")
     args = parser.parse_args()
 
@@ -192,12 +195,20 @@ if __name__ == "__main__":
         warmup_with=args.warmup_with,
         log_path=exp_dir,
     )
+
+    if args.use_wandb:
+        wandb.init(project='DiffRep', dir=exp_dir, sync_tensorboard=True)
+        wandb.config.update(vars(args))
+        wandb.config.update({'log_dir': exp_dir})
     
     trainer.setup(exp)
     log_git_details(log_file=os.path.join(exp_dir, 'git.diff'))
-    
+
     # Save the arguments to a YAML file
     args_dict = vars(args)
     with open(os.path.join(exp_dir, 'config.yaml'), 'w') as yaml_file:
         yaml.dump(args_dict, yaml_file)
     trainer.run(train_key)
+
+    if args.use_wandb:
+        wandb.finish()

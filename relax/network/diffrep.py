@@ -67,7 +67,8 @@ class DiffRepNet:
             act = jnp.take_along_axis(acts, q_best_ind[..., None], axis=0).squeeze(axis=0)
         act = act + jax.random.normal(noise_key, act.shape) * jnp.exp(log_alpha) * self.noise_scale
         if return_rep:
-            # selecting t=0
+            # TODO: this is wrong! the returned value is the derivative not the representation
+            # Think of how to fix this!
             rep = self.policy(policy_params, obs, act, t=0)[0]
             return act, rep
         return act
@@ -119,7 +120,8 @@ def create_diffrep_net(
         q = hk.without_apply_rng(hk.transform(lambda obs, act: QNet(hidden_sizes, activation)(obs, act)))
     policy = hk.without_apply_rng(hk.transform(lambda obs, act, t: DiffusionRepPolicyNet(
         diffusion_hidden_sizes, activation, embedding_dim=rep_embedding_dim)(obs, act, t)))
-    mu = hk.without_apply_rng(hk.transform(lambda next_obs: DiffusionRepMuNet(diffusion_hidden_sizes, activation)(next_obs)))
+    mu = hk.without_apply_rng(hk.transform(lambda next_obs: DiffusionRepMuNet(
+        diffusion_hidden_sizes, activation, embedding_dim=rep_embedding_dim)(next_obs)))
 
     @jax.jit
     def init(key, obs, act):

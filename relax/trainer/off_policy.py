@@ -9,6 +9,7 @@ from gymnasium import Env
 from tqdm import tqdm
 from tensorboardX import SummaryWriter
 from tensorboardX.summary import hparams
+import wandb
 
 from relax.algorithm import Algorithm
 from relax.buffer import ExperienceBuffer
@@ -81,6 +82,7 @@ class OffPolicyTrainer:
 
         # Setup logger
         self.logger = SummaryWriter(str(self.log_path))
+
         self.progress = tqdm(total=self.total_step, desc="Sample Step", disable=None, dynamic_ncols=True)
 
         self.algorithm.save_policy_structure(self.log_path, dummy_data.obs[0])
