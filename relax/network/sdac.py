@@ -70,8 +70,6 @@ class SDACNet:
         best_action = jax.vmap(slice, (0, 0))(batch_action, max_q_idx)
         return best_action
 
-
-
     def get_deterministic_action(self, policy_params: hk.Params, obs: jax.Array) -> jax.Array:
         key = random_key_from_data(obs)
         policy_params, log_alpha, q1_params, q2_params = policy_params

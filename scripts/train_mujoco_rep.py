@@ -14,6 +14,7 @@ from relax.algorithm.dipo import DIPO
 import wandb
 from relax.algorithm.qvpo import QVPO
 from relax.algorithm.sdac import SDAC
+from relax.algorithm.sdac_rep import SDACRep
 from relax.algorithm.diffrep import DiffRep
 from relax.algorithm.diffrep_image import DiffRepImage
 from relax.buffer import TreeBuffer
@@ -23,6 +24,7 @@ from relax.network.qsm import create_qsm_net
 from relax.network.dipo import create_dipo_net
 from relax.network.sdac import create_sdac_net
 from relax.network.diffrep import create_diffrep_net
+from relax.network.sdac_rep import create_sdac_rep_net
 from relax.network.diffrep_image import create_diffrep_image_net
 from relax.network.qvpo import create_qvpo_net
 from relax.trainer.off_policy import OffPolicyTrainer
@@ -34,21 +36,25 @@ from relax.utils.log_diff import log_git_details
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--alg", type=str, default="sdac")
+    parser.add_argument("--alg", type=str, default="sdac_rep")
     parser.add_argument("--env", type=str, default="Ant-v4")
     parser.add_argument("--suffix", type=str, default="test_use_atp1")
     parser.add_argument("--num_vec_envs", type=int, default=5)
 
-    parser.add_argument("--hidden_num", type=int, default=3)
+    parser.add_argument("--hidden_num", type=int, default=2)
     parser.add_argument("--hidden_dim", type=int, default=512)
     parser.add_argument("--diffusion_hidden_num", type=int, default=3)
     parser.add_argument("--diffusion_hidden_dim", type=int, default=512)
+    parser.add_argument("--feature_hidden_num", type=int, default=2)
+    parser.add_argument("--feature_hidden_dim", type=int, default=512)
     parser.add_argument("--num_particles", type=int, default=32)
     parser.add_argument("--noise_scale", type=float, default=0.1)
     parser.add_argument("--batch_size", type=int, default=256)
 
-    # for diffrep
+    # for rep
     parser.add_argument("--rep_embedding_dim", type=int, default=256) # this is multiplied by nu!
+
+    # for diff rep
     parser.add_argument("--rep_weight", type=float, default=0.0)
     parser.add_argument("--use_rff_critics", default=False, action="store_true")
     
@@ -89,6 +95,7 @@ if __name__ == "__main__":
 
     hidden_sizes = [args.hidden_dim] * args.hidden_num
     diffusion_hidden_sizes = [args.diffusion_hidden_dim] * args.diffusion_hidden_num
+    feature_hidden_sizes = [args.feature_hidden_dim] * args.feature_hidden_num
 
     gelu = partial(jax.nn.gelu, approximate=False)
 
@@ -104,6 +111,20 @@ if __name__ == "__main__":
                            delay_alpha_update=args.delay_alpha_update,
                              lr_schedule_end=args.lr_schedule_end,
                              use_ema=args.use_ema_policy)
+    elif args.alg == 'sdac_rep':
+        def mish(x: jax.Array):
+            return x * jnp.tanh(jax.nn.softplus(x))
+        agent, params = create_sdac_rep_net(init_network_key, obs_dim=obs_dim, act_dim=act_dim, feature_dim=args.rep_embedding_dim, 
+                                            hidden_sizes=hidden_sizes, diffusion_hidden_sizes=diffusion_hidden_sizes, 
+                                            feature_hidden_sizes=feature_hidden_sizes, activation=mish,
+                                            num_timesteps=args.diffusion_steps,
+                                            num_particles=args.num_particles,
+                                            noise_scale=args.noise_scale,
+                                            target_entropy_scale=args.target_entropy_scale)
+        algorithm = SDACRep(agent, params, lr=args.lr, alpha_lr=args.alpha_lr,
+                         delay_alpha_update=args.delay_alpha_update,
+                         lr_schedule_end=args.lr_schedule_end,
+                            use_ema=args.use_ema_policy, use_target_feature=True, reward_loss_wgt=0.0)
     elif args.alg == 'diffrep':
         def mish(x: jax.Array):
             return x * jnp.tanh(jax.nn.softplus(x))

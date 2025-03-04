@@ -7,33 +7,35 @@ import haiku as hk
 import pickle
 
 from relax.algorithm.base import Algorithm
-from relax.network.dacer import DACERNet, DACERParams
-from relax.network.sdac import SDACNet, Diffv2Params
+from relax.network.sdac import Diffv2Params
+from relax.algorithm.sdac import Diffv2TrainState, Diffv2OptStates
+from relax.network.sdac_rep import SDACRepNet, SDACRepParams
 from relax.utils.experience import Experience
 from relax.utils.typing import Metric
 
 
-class Diffv2OptStates(NamedTuple):
+class SDACRepOptStates(NamedTuple):
     q1: optax.OptState
     q2: optax.OptState
     policy: optax.OptState
     log_alpha: optax.OptState
+    feature: optax.OptState
 
 
-class Diffv2TrainState(NamedTuple):
-    params: Diffv2Params
-    opt_state: Diffv2OptStates
+class SDACRepTrainState(NamedTuple):
+    params: SDACRepParams
+    opt_state: SDACRepOptStates
     step: int
     entropy: float
     running_mean: float
     running_std: float
 
-class SDAC(Algorithm):
+class SDACRep(Algorithm):
 
     def __init__(
         self,
-        agent: SDACNet,
-        params: Diffv2Params,
+        agent: SDACRepNet,
+        params: SDACRepParams,
         *,
         gamma: float = 0.99,
         lr: float = 1e-4,
@@ -45,6 +47,8 @@ class SDAC(Algorithm):
         reward_scale: float = 0.2,
         num_samples: int = 200,
         use_ema: bool = True,
+        use_target_feature: bool = True,
+        reward_loss_wgt: bool = False,
     ):
         self.agent = agent
         self.gamma = gamma
@@ -53,6 +57,8 @@ class SDAC(Algorithm):
         self.delay_update = delay_update
         self.reward_scale = reward_scale
         self.num_samples = num_samples
+        self.use_target_feature = use_target_feature
+        self.reward_loss_wgt = reward_loss_wgt
         self.optim = optax.adam(lr)
         lr_schedule = optax.schedules.linear_schedule(
             init_value=lr,
@@ -64,14 +70,16 @@ class SDAC(Algorithm):
         self.alpha_optim = optax.adam(alpha_lr)
         self.entropy = 0.0
 
-        self.state = Diffv2TrainState(
+        self.state = SDACRepTrainState(
             params=params,
-            opt_state=Diffv2OptStates(
+            opt_state=SDACRepOptStates(
                 q1=self.optim.init(params.q1),
                 q2=self.optim.init(params.q2),
-                # policy=self.optim.init(params.policy),
                 policy=self.policy_optim.init(params.policy),
                 log_alpha=self.alpha_optim.init(params.log_alpha),
+                feature=self.optim.init({'feature': params.feature,
+                                         'mu': params.mu,
+                                         'theta': params.theta}),
             ),
             step=jnp.int32(0),
             entropy=jnp.float32(0.0),
@@ -85,31 +93,76 @@ class SDAC(Algorithm):
             key: jax.Array, state: Diffv2TrainState, data: Experience
         ) -> Tuple[Diffv2OptStates, Metric]:
             obs, action, reward, next_obs, done = data.obs, data.action, data.reward, data.next_obs, data.done
-            q1_params, q2_params, target_q1_params, target_q2_params, policy_params, target_policy_params, log_alpha = state.params
-            q1_opt_state, q2_opt_state, policy_opt_state, log_alpha_opt_state = state.opt_state
+            (q1_params, q2_params, target_q1_params, target_q2_params,
+              policy_params, target_policy_params, log_alpha,
+                feat_params, target_feat_params, mu_params, theta_params) = state.params
+            q1_opt_state, q2_opt_state, policy_opt_state, log_alpha_opt_state, feature_opt_state = state.opt_state
             step = state.step
             running_mean = state.running_mean
             running_std = state.running_std
-            next_eval_key, new_eval_key, new_q1_eval_key, new_q2_eval_key, log_alpha_key, diffusion_time_key, diffusion_noise_key = jax.random.split(
-                key, 7)
-
+            next_eval_key, diffusion_time_key, diffusion_noise_key = jax.random.split(key, 3)
             reward *= self.reward_scale
 
-            def get_min_q(s, a):
-                q1 = self.agent.q(q1_params, s, a)
-                q2 = self.agent.q(q2_params, s, a)
+            def delay_target_update(params, target_params, tau):
+                return jax.lax.cond(
+                    step % self.delay_update == 0,
+                    lambda target_params: optax.incremental_update(
+                        params, target_params, tau),
+                    lambda target_params: target_params,
+                    target_params
+                )
+
+            # --------- feature step ----------
+            def feature_loss_fn(params: hk.Params) -> jax.Array:
+                feat = self.agent.feature(params['feature'], obs, action)
+                mu = self.agent.mu(params['mu'], next_obs)
+
+                labels = jnp.eye(obs.shape[0])
+                contrastive = jnp.sum(feat[:, None, :] * mu[None, :, :], axis=-1)
+                ce = -jnp.sum(labels * jax.nn.log_softmax(contrastive))
+                feature_loss = ce / obs.shape[0]
+                r_loss = 0.0
+                if self.reward_loss_wgt > 0:
+                    rhat = self.agent.theta(params['theta'], feat)
+                    r_loss = jnp.mean((rhat - reward) ** 2)
+                feature_loss += self.reward_loss_wgt * r_loss
+                return feature_loss, (r_loss, ce)
+
+            feat_step_params = {'feature': feat_params, 'mu': mu_params, 'theta': theta_params}
+            (feat_loss, (r_loss, ce)), feat_grads = jax.value_and_grad(
+                feature_loss_fn, has_aux=True)(feat_step_params)
+            feature_update, feature_opt_state = self.optim.update(feat_grads, feature_opt_state)
+            feat_step_params = optax.apply_updates(feat_step_params, feature_update)
+            
+            feature_params = feat_step_params['feature']
+            mu_params = feat_step_params['mu']
+            theta_params = feat_step_params['theta']
+            target_feat_params = delay_target_update(feature_params, target_feat_params, self.tau)
+
+            # ----- rest is standard SDAC with feature-based critic ------
+            def get_min_q(feat):
+                q1 = self.agent.q(q1_params, feat)
+                q2 = self.agent.q(q2_params, feat)
                 q = jnp.minimum(q1, q2)
                 return q
+            
+            act_feat_params = target_feat_params if self.use_target_feature else feature_params
+            params = (policy_params, log_alpha, q1_params, q2_params, act_feat_params, mu_params, theta_params) 
+            next_action = self.agent.get_action(next_eval_key, params, next_obs)
+            if self.use_target_feature:
+                feat = self.agent.feature(target_feat_params, obs, action)
+                next_feat = self.agent.feature(target_feat_params, next_obs, next_action)
+            else:
+                feat = self.agent.feature(feat_params, obs, action)
+                next_feat = self.agent.feature(feat_params, obs, action)
 
-
-            next_action = self.agent.get_action(next_eval_key, (policy_params, log_alpha, q1_params, q2_params), next_obs)
-            q1_target = self.agent.q(target_q1_params, next_obs, next_action)
-            q2_target = self.agent.q(target_q2_params, next_obs, next_action)
+            q1_target = self.agent.q(target_q1_params, next_feat)
+            q2_target = self.agent.q(target_q2_params, next_feat)
             q_target = jnp.minimum(q1_target, q2_target)  # - jnp.exp(log_alpha) * next_logp
             q_backup = reward + (1 - done) * self.gamma * q_target
 
             def q_loss_fn(q_params: hk.Params) -> jax.Array:
-                q = self.agent.q(q_params, obs, action)
+                q = self.agent.q(q_params, feat)
                 q_loss = jnp.mean((q - q_backup) ** 2)
                 return q_loss, q
 
@@ -122,7 +175,7 @@ class SDAC(Algorithm):
 
 
             def policy_loss_fn(policy_params) -> jax.Array:
-                q_min = get_min_q(next_obs, next_action)
+                q_min = get_min_q(next_feat)
                 q_mean, q_std = q_min.mean(), q_min.std()
                 norm_q = q_min - running_mean / running_std
                 scaled_q = norm_q.clip(-3., 3.) / jnp.exp(log_alpha)
@@ -166,14 +219,6 @@ class SDAC(Algorithm):
                     params, opt_state
                 )
 
-            def delay_target_update(params, target_params, tau):
-                return jax.lax.cond(
-                    step % self.delay_update == 0,
-                    lambda target_params: optax.incremental_update(params, target_params, tau),
-                    lambda target_params: target_params,
-                    target_params
-                )
-
             q1_params, q1_opt_state = param_update(self.optim, q1_params, q1_grads, q1_opt_state)
             q2_params, q2_opt_state = param_update(self.optim, q2_params, q2_grads, q2_opt_state)
             policy_params, policy_opt_state = delay_param_update(self.policy_optim, policy_params, policy_grads, policy_opt_state)
@@ -186,14 +231,17 @@ class SDAC(Algorithm):
             new_running_mean = running_mean + 0.001 * (q_mean - running_mean)
             new_running_std = running_std + 0.001 * (q_std - running_std)
 
-            state = Diffv2TrainState(
-                params=Diffv2Params(q1_params, q2_params, target_q1_params, target_q2_params, policy_params, target_policy_params, log_alpha),
-                opt_state=Diffv2OptStates(q1=q1_opt_state, q2=q2_opt_state, policy=policy_opt_state, log_alpha=log_alpha_opt_state),
+            state = SDACRepTrainState(
+                params=SDACRepParams(q1_params, q2_params, target_q1_params, target_q2_params, policy_params, target_policy_params,
+                                     log_alpha, feature_params, target_feat_params, mu_params, theta_params),
+                opt_state=SDACRepOptStates(q1=q1_opt_state, q2=q2_opt_state, policy=policy_opt_state, 
+                                           log_alpha=log_alpha_opt_state, feature=feature_opt_state),
                 step=step + 1,
                 entropy=jnp.float32(0.0),
                 running_mean=new_running_mean,
                 running_std=new_running_std
             )
+            
             info = {
                 "q1_loss": q1_loss,
                 "q1_mean": jnp.mean(q1),
@@ -211,16 +259,20 @@ class SDAC(Algorithm):
                 "running_q_mean": new_running_mean,
                 "running_q_std": new_running_std,
                 "entropy_approx": 0.5 * self.agent.act_dim * jnp.log( 2 * jnp.pi * jnp.exp(1) * (0.1 * jnp.exp(log_alpha)) ** 2),
+                'r_loss': r_loss,
+                'feature_ce_loss': ce,
+                'total_feature_loss': feat_loss,
             }
             return state, info
 
         self._implement_common_behavior(stateless_update, self.agent.get_action, self.agent.get_deterministic_action)
 
     def get_policy_params(self):
-        return (self.state.params.policy, self.state.params.log_alpha, self.state.params.q1, self.state.params.q2 )
+        feat_params = self.state.params.target_feature if self.use_target_feature else self.state.params.feature
+        return (self.state.params.policy, self.state.params.log_alpha, self.state.params.q1, self.state.params.q2, feat_params, self.state.params.mu, self.state.params.theta)
 
     def get_policy_params_to_save(self):
-        return (self.state.params.target_poicy, self.state.params.log_alpha, self.state.params.q1, self.state.params.q2)
+        return (self.state.params.target_policy, self.state.params.log_alpha, self.state.params.q1, self.state.params.q2, self.state.params.feature, self.state.params.mu, self.state.params.theta)
 
     def save_policy(self, path: str) -> None:
         policy = jax.device_get(self.get_policy_params_to_save())

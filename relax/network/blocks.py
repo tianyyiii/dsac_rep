@@ -40,6 +40,20 @@ class QNet(hk.Module):
 
 @dataclass
 @fix_repr
+class FeatureNet(hk.Module):
+    hidden_sizes: Sequence[int]
+    feature_size: int
+    activation: Activation
+    output_activation: Activation = Identity
+    name: str = None
+
+    def __call__(self, obs: jax.Array, act: jax.Array) -> jax.Array:
+        input = jnp.concatenate((obs, act), axis=-1)
+        return mlp(self.hidden_sizes, self.feature_size, self.activation, self.output_activation)(input)
+
+
+@dataclass
+@fix_repr
 class RFFQNet(hk.Module):
     hidden_sizes: Sequence[int]
     activation: Activation
