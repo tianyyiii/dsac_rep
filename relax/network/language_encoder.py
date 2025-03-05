@@ -1,48 +1,64 @@
 import logging
 
-import flax
-import flax.linen as nn
+# import flax
+# import flax.linen as nn
 import jax
+import haiku as hk
+from transformers import AutoTokenizer, FlaxBertModel
 import numpy as np
 
-class LanguageEncoder(nn.Module):
-    """
-    Language encoder that embeds text input IDs into continuous language embeddings. Supports pre-trained HF models.
 
-     Args:
-         num_tokens (int): Number of output tokens (not enforced).
-         encoder (str, optional): Optional HuggingFace AutoModel name for encoding input IDs.
-         finetune_encoder (bool, optional): Optional finetune last layers of the language model.
-    """
+# class LanguageEncoder(nn.Module):
+#     """
+#     Language encoder that embeds text input IDs into continuous language embeddings. Supports pre-trained HF models.
 
-    encoder: str = None
-    finetune_encoder: bool = False
+#      Args:
+#          num_tokens (int): Number of output tokens (not enforced).
+#          encoder (str, optional): Optional HuggingFace AutoModel name for encoding input IDs.
+#          finetune_encoder (bool, optional): Optional finetune last layers of the language model.
+#     """
 
-    def setup(self):
-        if self.encoder is not None:
-            from transformers import AutoConfig, FlaxAutoModel, FlaxT5EncoderModel, AutoTokenizer
+#     encoder: str = None
+#     finetune_encoder: bool = False
 
-            self.tokenizer = AutoTokenizer.from_pretrained("google-t5/t5-base")
+#     def setup(self):
+#         if self.encoder is not None:
+#             from transformers import AutoConfig, FlaxAutoModel, FlaxT5EncoderModel, AutoTokenizer
 
-            config = AutoConfig.from_pretrained(self.encoder)
-            if "t5" in self.encoder:
-                self.hf_model = FlaxT5EncoderModel(config).module
-            else:
-                self.hf_model = FlaxAutoModel.from_config(config).module
+#             self.tokenizer = AutoTokenizer.from_pretrained("google-t5/t5-base")
 
-    def __call__(
-        self,
-        tasks=None,
-    ):
-        if "language_instruction" not in tasks:
-            logging.warning("No language inputs found. Skipping tokenizer entirely.")
-            assert self.proper_pad_mask, "Cannot skip unless using proper pad mask."
-            return None
-        else:
-            tokens = self.tokenizer(tasks["language_instruction"], return_tensors="np")
-            tokens = self.hf_model(tokens).last_hidden_state
+#             config = AutoConfig.from_pretrained(self.encoder)
+#             if "t5" in self.encoder:
+#                 self.hf_model = FlaxT5EncoderModel(config).module
+#             else:
+#                 self.hf_model = FlaxAutoModel.from_config(config).module
 
-        if not self.finetune_encoder:
-            tokens = jax.lax.stop_gradient(tokens)
+#     def __call__(
+#         self,
+#         tasks=None,
+#     ):
+#         if "language_instruction" not in tasks:
+#             logging.warning("No language inputs found. Skipping tokenizer entirely.")
+#             assert self.proper_pad_mask, "Cannot skip unless using proper pad mask."
+#             return None
+#         else:
+#             tokens = self.tokenizer(tasks["language_instruction"], return_tensors="np")
+#             tokens = self.hf_model(tokens).last_hidden_state
 
-        return tokens
+#         if not self.finetune_encoder:
+#             tokens = jax.lax.stop_gradient(tokens)
+
+#         return tokens
+    
+
+class BertLanguageEncoder(hk.Module):
+    def __init__(self, model_name="google-bert/bert-base-uncased", name=None):
+        super().__init__(name=name)
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+        self.model = FlaxBertModel.from_pretrained(model_name)
+
+    def __call__(self, sentence: str):
+        inputs = self.tokenizer(sentence, return_tensors="jax")
+        outputs = self.model(**inputs)
+        return outputs.pooler_output
+    

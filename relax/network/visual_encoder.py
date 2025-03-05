@@ -16,6 +16,8 @@ from relax.utils.jax_utils import fix_repr
 
 
 T = TypeVar("T")
+LOG_SIG_MAX = 2
+LOG_SIG_MIN = -20
 
 def normalize_images(img, img_norm_type="default"):
     if img_norm_type == "default":
@@ -219,12 +221,13 @@ class ResNetEncoder(hk.Module):
             x = hk.Linear(self.embedding_dim)(x)
         return x
     
-
+@dataclass
+@fix_repr
 class ConvNetEncoder(hk.Module):
-    def __init__(self, embedding_dim, name=None):
+    def __init__(self, obs_shape=(25, 25, 32), name=None):
         super().__init__(name=name)
 
-        self.repr_dim = 32 * 25 * 25
+        self.repr_dim = obs_shape[0] * obs_shape[1] * obs_shape[2]
         
         self.convnet = hk.Sequential([
             hk.Conv2D(output_channels=32, kernel_shape=3, stride=2, padding='VALID'),
@@ -236,15 +239,83 @@ class ConvNetEncoder(hk.Module):
             hk.Conv2D(output_channels=32, kernel_shape=3, stride=1, padding='VALID'),
             jax.nn.relu,
         ])
-        self.linear = hk.Linear(embedding_dim)
 
     def __call__(self, obs):
         obs = obs / 255.0 - 0.5
         h = self.convnet(obs)
-        h = jnp.reshape(h, (h.shape[0], -1))
-        h = self.linear(h)
+        h = h.reshape(h.shape[0], -1)
         return h
 
+@dataclass
+@fix_repr
+class ConvNetDecoder(hk.Module):
+    def __init__(self, obs_shape=(25, 25, 32), name=None):
+        super().__init__(name=name)
+
+        self.repr_shape = obs_shape
+        
+        self.deconvnet = hk.Sequential([
+            hk.Conv2DTranspose(output_channels=32, kernel_shape=3, stride=1, padding="VALID"),
+            jax.nn.relu,
+            hk.Conv2DTranspose(output_channels=32, kernel_shape=3, stride=1, padding="VALID"),
+            jax.nn.relu,
+            hk.Conv2DTranspose(output_channels=32, kernel_shape=3, stride=1, padding="VALID"),
+            jax.nn.relu,
+            hk.Conv2DTranspose(output_channels=32, kernel_shape=3, stride=2, padding="VALID"),
+            jax.nn.relu,
+            hk.Conv2D(output_channels=6, kernel_shape=2, stride=1, padding=((1, 1), (1, 1)))
+        ])
+
+    def __call__(self, obs):
+        obs = obs.reshape(obs.shape[0], *self.repr_shape) if len(obs.shape)==2 else obs.reshape(self.repr_shape)
+        return self.deconvnet(obs)
+    
+
+@dataclass
+@fix_repr
+class VaeEncoder(hk.Module):
+    def __init__(self, tanh, hidden_dim=256, name=None):
+        super().__init__(name=name)
+        self.tanh = tanh
+        self.mean_linear = hk.Linear(hidden_dim)
+        self.mean_layer_norm = hk.LayerNorm(axis=-1, create_scale=False, create_offset=False)
+        self.mean_activation = jax.nn.tanh if tanh else lambda x: x
+        self.log_std_linear = hk.Linear(hidden_dim)
+        self.log_std_layer_norm = hk.LayerNorm(axis=-1, create_scale=False, create_offset=False)
+
+    def __call__(self, state):
+        mean = self.mean_linear(state)
+        mean = self.mean_layer_norm(mean)
+        mean = self.mean_activation(mean)
+
+        log_std = self.log_std_linear(state)
+        log_std = self.log_std_layer_norm(log_std)
+        log_std = jnp.clip(log_std, a_min=LOG_SIG_MIN, a_max=LOG_SIG_MAX)
+        return mean, log_std
+
+    def sample(self, state, rng):
+        mean, log_std = self.__call__(state)
+        std = jnp.exp(log_std)
+        epsilon = jax.random.normal(rng, shape=mean.shape)
+        z = mean + std * epsilon
+        return z
+    
+@dataclass
+@fix_repr
+class VaeDecoder(hk.Module):
+    def __init__(self, repr_dim, hidden_dim=256, name=None):
+        super().__init__(name=name)
+        self.l1 = hk.Linear(hidden_dim)
+        self.l2 = hk.Linear(hidden_dim)
+        self.state_linear = hk.Linear(repr_dim)
+        self.reward_linear = hk.Linear(1)
+
+    def __call__(self, feature):
+        x = jax.nn.relu(self.l1(feature))
+        x = jax.nn.relu(self.l2(x))
+        s = self.state_linear(x)
+        r = self.reward_linear(x)
+        return s, r
 
 
 

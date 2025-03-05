@@ -6,7 +6,7 @@ import haiku as hk
 import math
 
 from relax.network.blocks import Activation, DistributionalQNet2, DACERPolicyNet, QNet, DiffusionRepPolicyNet, DiffusionRepMuNet
-from relax.network.visual_encoder import ResidualBlock, ResNetEncoder, ConvNetEncoder
+from relax.network.visual_encoder import ResidualBlock, ResNetEncoder, ConvNetEncoder, ConvNetDecoder, VaeEncoder, VaeDecoder
 from relax.network.common import WithSquashedGaussianPolicy
 from relax.utils.diffusion import GaussianDiffusion
 from relax.utils.jax_utils import random_key_from_data
@@ -20,6 +20,9 @@ class DiffRepImageParams(NamedTuple):
     target_poicy: hk.Params
     mu: hk.Params
     encoder_v: hk.Params
+    decoder_v: hk.Params
+    encoder_vae: hk.Params
+    decoder_vae: hk.Params
     log_alpha: jax.Array
 
 
@@ -29,6 +32,9 @@ class DiffRepImageNet:
     policy: Callable[[hk.Params, jax.Array, jax.Array, jax.Array], jax.Array]
     mu: Callable[[hk.Params, jax.Array], jax.Array]
     encoder_v: Callable[[hk.Params, jax.Array], jax.Array]
+    decoder_v: Callable[[hk.Params, jax.Array], jax.Array]
+    encoder_vae: Callable[[hk.Params, jax.Array], jax.Array]
+    decoder_vae: Callable[[hk.Params, jax.Array], jax.Array]
     num_timesteps: int
     act_dim: int
     num_particles: int
@@ -140,14 +146,21 @@ def create_diffrep_image_net(
     q = hk.without_apply_rng(hk.transform(lambda obs, act: QNet(hidden_sizes, activation)(obs, act)))
     policy = hk.without_apply_rng(hk.transform(lambda obs, act, t: DiffusionRepPolicyNet(diffusion_hidden_sizes, activation)(obs, act, t)))
     mu = hk.without_apply_rng(hk.transform(lambda next_obs: DiffusionRepMuNet(diffusion_hidden_sizes, activation)(next_obs)))
-    # encoder_v = hk.without_apply_rng(hk.transform(lambda obs: ResNetEncoder(embedding_dim)(obs)))
     encoder_v = hk.without_apply_rng(hk.transform(lambda obs: ConvNetEncoder(embedding_dim)(obs)))
+    decoder_v = hk.without_apply_rng(hk.transform(lambda obs: ConvNetDecoder(embedding_dim)(obs)))
+    encoder_vae = hk.transform(lambda obs, rng: VaeEncoder(True).sample(obs, rng))
+    decoder_vae = hk.without_apply_rng(hk.transform(lambda obs: VaeDecoder(embedding_dim[0] * embedding_dim[1] * embedding_dim[2])(obs)))
 
     @jax.jit
     def init(key, obs, act):
-        q1_key, q2_key, policy_key, mu_key, encoder_v_key = jax.random.split(key, 5)
+        q1_key, q2_key, policy_key, mu_key, encoder_v_key, decoder_v_key, encoder_vae_key, decoder_vae_key = jax.random.split(key, 8)
         encoder_v_params = encoder_v.init(encoder_v_key, obs)
         obs = encoder_v.apply(encoder_v_params, obs)
+        encoder_vae_params = encoder_vae.init(encoder_vae_key, obs, q1_key)
+        obs1 = encoder_vae.apply(encoder_vae_params, q1_key, obs, q1_key)
+        decoder_vae_params = decoder_vae.init(decoder_vae_key, obs1)
+        obs2, _ = decoder_vae.apply(decoder_vae_params, obs1)
+        decoder_v_params = decoder_v.init(decoder_v_key, obs2)
         q1_params = q.init(q1_key, obs, act)
         q2_params = q.init(q2_key, obs, act)
         target_q1_params = q1_params
@@ -156,14 +169,17 @@ def create_diffrep_image_net(
         target_policy_params = policy_params
         mu_params = mu.init(mu_key, obs)
         log_alpha = jnp.array(math.log(5), dtype=jnp.float32) # math.log(3) or math.log(5) choose one
-        return DiffRepImageParams(q1_params, q2_params, target_q1_params, target_q2_params, policy_params, target_policy_params, mu_params, encoder_v_params, log_alpha)
+        return DiffRepImageParams(q1_params, q2_params, target_q1_params, target_q2_params, policy_params, target_policy_params, mu_params, 
+                                  encoder_v_params, decoder_v_params, encoder_vae_params, decoder_vae_params, log_alpha)
 
     sample_obs = jnp.zeros((1, obs_dim))
     sample_act = jnp.zeros((1, act_dim))
     sample_obs = sample_obs.reshape(1, 64, 64, 6)
     params = init(key, sample_obs, sample_act)
 
-    net = DiffRepImageNet(q=q.apply, policy=policy.apply, mu=mu.apply, encoder_v=encoder_v.apply, num_timesteps=num_timesteps, act_dim=act_dim, 
-                    target_entropy=-act_dim*target_entropy_scale, num_particles=num_particles, noise_scale=noise_scale,
-                    noise_schedule='linear')
+    net = DiffRepImageNet(q=q.apply, policy=policy.apply, mu=mu.apply, encoder_v=encoder_v.apply, decoder_v=decoder_v.apply, 
+                          encoder_vae=encoder_vae.apply, decoder_vae=decoder_vae.apply,
+                          num_timesteps=num_timesteps, act_dim=act_dim, 
+                          target_entropy=-act_dim*target_entropy_scale, num_particles=num_particles, noise_scale=noise_scale,
+                          noise_schedule='linear')
     return net, params
