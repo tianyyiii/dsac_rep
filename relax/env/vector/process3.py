@@ -147,7 +147,18 @@ class ProcessVectorEnv(VectorEnv):
             dummy_env = ALL_V2_ENVIRONMENTS_GOAL_OBSERVABLE[name.split("/")[1]](seed=seed)
             dummy_env = MetaWorldWrapper(dummy_env, obs_type)
         elif "mt-10" in name:
-            env_names = list(ALL_V2_ENVIRONMENTS_GOAL_OBSERVABLE.keys())[10:20]
+            env_names = [
+                'window-open-v2-goal-observable',
+                'window-close-v2-goal-observable',
+                'peg-insert-side-v2-goal-observable',
+                'door-open-v2-goal-observable',
+                'drawer-open-v2-goal-observable',
+                'pick-place-v2-goal-observable',
+                'reach-v2-goal-observable',
+                'button-press-topdown-v2-goal-observable',
+                'drawer-close-v2-goal-observable',
+                'push-v2-goal-observable',
+                ]
             envs = [ALL_V2_ENVIRONMENTS_GOAL_OBSERVABLE[env_name](seed=seed) for env_name in env_names]
             dummy_env = MultiTaskMetaWorldWrapper(envs, obs_type)
         else:

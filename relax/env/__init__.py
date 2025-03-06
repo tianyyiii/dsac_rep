@@ -41,8 +41,11 @@ class RelaxWrapper(Wrapper):
             seed=action_seed
         )
 
-    def reset(self, *, seed=None, options=None):
-        obs, info = self.env.reset(seed=seed, options=options)
+    def reset(self, *, env_index=None, seed=None, options=None):
+        if env_index:
+            obs, info = self.env.reset(env_index=env_index, seed=seed, options=options)
+        else:
+            obs, info = self.env.reset(seed=seed, options=options)
         return obs.astype(np.float32, copy=False), info
 
     def step(self, action: np.ndarray):
@@ -123,8 +126,11 @@ class MultiTaskMetaWorldWrapper(Wrapper):
             self.observation_space = Box(low=low, high=high, dtype=orig_space.dtype)
         self.action_space = self.current_env.action_space
 
-    def reset(self, **kwargs):
-        self.env_index = random.randint(0, self.env_num - 1)
+    def reset(self, env_index=None, **kwargs):
+        if env_index:
+            self.env_index = env_index
+        else:
+            self.env_index = random.randint(0, self.env_num - 1)
         self.current_env = self.envs[self.env_index]
         obs = self.current_env.reset()
         self._t = 0
@@ -169,7 +175,18 @@ def create_env(name: str, seed: int, obs_type: str = "state", action_seed: int =
         env = ALL_V2_ENVIRONMENTS_GOAL_OBSERVABLE[name.split("/")[1]](seed=seed)
         env = MetaWorldWrapper(env, obs_type)
     elif "mt-10" in name:
-        env_names = list(ALL_V2_ENVIRONMENTS_GOAL_OBSERVABLE.keys())[10:20]
+        env_names = [
+        'window-open-v2-goal-observable',
+        'window-close-v2-goal-observable',
+        'peg-insert-side-v2-goal-observable',
+        'door-open-v2-goal-observable',
+        'drawer-open-v2-goal-observable',
+        'pick-place-v2-goal-observable',
+        'reach-v2-goal-observable',
+        'button-press-topdown-v2-goal-observable',
+        'drawer-close-v2-goal-observable',
+        'push-v2-goal-observable',
+        ]
         envs = [ALL_V2_ENVIRONMENTS_GOAL_OBSERVABLE[env_name](seed=seed) for env_name in env_names]
         env = MultiTaskMetaWorldWrapper(envs, obs_type)
     else:

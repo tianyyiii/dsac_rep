@@ -17,13 +17,13 @@ from tensorboardX import SummaryWriter
 from relax.env import create_env
 from relax.utils.persistence import PersistFunction
 
-def evaluate(env, policy_fn, policy_params, num_episodes, policy_root, render=False):
+def evaluate(env, policy_fn, policy_params, num_episodes, policy_root, render=True):
     ep_len_list = []
     ep_ret_list = []
-    frames = []
     ep_success = 0
     for episode_i in range(num_episodes):
-        obs, _ = env.reset()
+        frames = []
+        obs, _ = env.reset(env_index=int(episode_i%10))
         ep_len = 0
         ep_ret = 0.0
         while True:
@@ -32,7 +32,7 @@ def evaluate(env, policy_fn, policy_params, num_episodes, policy_root, render=Fa
             obs, reward, terminated, truncated, info = env.step(act)
             ep_len += 1
             ep_ret += reward
-            if render and episode_i == 0:
+            if render and episode_i <= 10:
                 frame = env.unwrapped.render(offscreen=True, resolution=(256,256))
                 frames.append(frame)
             if info["success"]:
@@ -42,9 +42,9 @@ def evaluate(env, policy_fn, policy_params, num_episodes, policy_root, render=Fa
                 break
         ep_len_list.append(ep_len)
         ep_ret_list.append(ep_ret)
-    if render:
-        video_filename = f"{policy_root}/step_{step}.mp4"
-        imageio.mimsave(video_filename, frames, fps=30)
+        if render and episode_i <= 10:
+            video_filename = f"{policy_root}/step_{step}_episode_{episode_i}.mp4"
+            imageio.mimsave(video_filename, frames, fps=30)
     return ep_len_list, ep_ret_list, ep_success
 
 class Logger(object):
