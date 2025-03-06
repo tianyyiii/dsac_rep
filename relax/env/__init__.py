@@ -1,4 +1,5 @@
 from collections import deque
+import random
 import numpy as np
 from gymnasium import Env, Wrapper, make
 from gymnasium.spaces import Box
@@ -100,10 +101,77 @@ class MetaWorldWrapper(Wrapper):
         return self.env.unwrapped
     
 
+class MultiTaskMetaWorldWrapper(Wrapper):
+    def __init__(self, envs, obs_type="state", n_stack=2, max_episode_steps=500):
+        self.envs = envs
+        self.env_num = len(self.envs)
+        self.obs_type = obs_type
+        self.n_stack = n_stack
+        self.frames = deque(maxlen=n_stack)
+        for env in self.envs:
+            env._freeze_rand_vec = False
+        self._max_episode_steps = max_episode_steps
+        self._t = 0
+        self.env_index = random.randint(0, self.env_num - 1)
+        self.current_env = self.envs[self.env_index]
+        if self.obs_type == "image":
+            self.observation_space = Box(low=0, high=255, shape=(64 * 64 * 3 * n_stack,), dtype=np.uint8)
+        else:
+            orig_space = self.current_env.observation_space
+            low = np.concatenate([orig_space.low, np.array([-np.inf])])
+            high = np.concatenate([orig_space.high, np.array([np.inf])])
+            self.observation_space = Box(low=low, high=high, dtype=orig_space.dtype)
+        self.action_space = self.current_env.action_space
+
+    def reset(self, **kwargs):
+        self.env_index = random.randint(0, self.env_num - 1)
+        self.current_env = self.envs[self.env_index]
+        obs = self.current_env.reset()
+        self._t = 0
+        if self.obs_type == "image":
+            frame = self.current_env.render(offscreen=True, resolution=(64,64))
+            for _ in range(self.n_stack):
+                self.frames.append(frame)
+            obs = np.concatenate(list(self.frames), axis=2)
+            obs = obs.reshape(-1)
+        else:
+            env_idx_array = np.array([self.env_index], dtype=obs.dtype)
+            obs = np.concatenate([obs, env_idx_array], axis=0)
+        return obs, {}
+
+    def step(self, action):
+        total_reward = 0
+        for _ in range(2):
+            obs, reward, done, info = self.current_env.step(action.copy())
+            if self.obs_type == "state":
+                env_idx_array = np.array([self.env_index], dtype=obs.dtype)
+                obs = np.concatenate([obs, env_idx_array], axis=0)
+            total_reward += reward
+            self._t += 1
+        if self.obs_type == "image":
+            frame = self.current_env.render(offscreen=True, resolution=(64, 64))
+            self.frames.append(frame)
+            obs = np.concatenate(list(self.frames), axis=2)
+            obs = obs.reshape(-1)
+        else:
+            obs = obs.astype(np.float32)
+        terminated = False
+        truncated = (self._t >= self._max_episode_steps)
+        return obs, total_reward, terminated, truncated, info
+
+    @property
+    def unwrapped(self):
+        return self.current_env.unwrapped
+    
+
 def create_env(name: str, seed: int, obs_type: str = "state", action_seed: int = 0):
     if "metaworld" in name:
         env = ALL_V2_ENVIRONMENTS_GOAL_OBSERVABLE[name.split("/")[1]](seed=seed)
         env = MetaWorldWrapper(env, obs_type)
+    elif "mt-10" in name:
+        env_names = list(ALL_V2_ENVIRONMENTS_GOAL_OBSERVABLE.keys())[10:20]
+        envs = [ALL_V2_ENVIRONMENTS_GOAL_OBSERVABLE[env_name](seed=seed) for env_name in env_names]
+        env = MultiTaskMetaWorldWrapper(envs, obs_type)
     else:
         env = make(name)
     env.reset(seed=seed)

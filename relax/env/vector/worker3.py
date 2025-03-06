@@ -11,7 +11,7 @@ from metaworld.envs import ALL_V2_ENVIRONMENTS_GOAL_OBSERVABLE
 import setproctitle
 from relax.prctl import set_client_pdeathsig
 from relax.futex import futex_client_wait, futex_client_notify
-from relax.env import MetaWorldWrapper
+from relax.env import MetaWorldWrapper, MultiTaskMetaWorldWrapper
 
 import warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning, module=r"^gymnasium\.")
@@ -41,6 +41,10 @@ def main():
         if "metaworld" in args.env:
             env = ALL_V2_ENVIRONMENTS_GOAL_OBSERVABLE[args.env.split("/")[1]](seed=seed)
             env = MetaWorldWrapper(env, args.obs_type)
+        elif "mt-10" in args.env:
+            env_names = list(ALL_V2_ENVIRONMENTS_GOAL_OBSERVABLE.keys())[10:20]
+            envs_mt = [ALL_V2_ENVIRONMENTS_GOAL_OBSERVABLE[env_name](seed=seed) for env_name in env_names]
+            env = MultiTaskMetaWorldWrapper(envs_mt, args.obs_type)
         else:
             env = gymnasium.make(args.env)
         env.reset(seed=seed)
