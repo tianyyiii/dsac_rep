@@ -1,9 +1,10 @@
-from typing import Protocol, Tuple
+from typing import Protocol, Tuple, Callable
 from dataclasses import dataclass
 
 import numpy as np
 import jax, jax.numpy as jnp
 import optax
+import haiku
 
 class DiffusionModel(Protocol):
     def __call__(self, t: jax.Array, x: jax.Array) -> jax.Array:
@@ -115,6 +116,28 @@ class GaussianDiffusion:
         t = jnp.arange(self.num_timesteps)[::-1]
         x, _ = jax.lax.scan(body_fn, x, (t, noise))
         return x
+
+    def smc_p_sample(self, key: jax.Array, model: DiffusionModel, model_q: Callable[..., jax.Array], shape: Tuple[int, ...], num_particles: int, temperature: float = 1.) -> jax.Array:
+        x_key, noise_key, scan_key = jax.random.split(key, 3)
+        x = 0.5 * jax.random.normal(x_key, (num_particles, *shape))
+        noise = jax.random.normal(noise_key, (self.num_timesteps, num_particles, *shape))
+
+        def body_fn(carry, input):
+            x, key = carry
+            t, noise = input
+            key, resampling_key = jax.random.split(key, 2)
+            noise_pred = model(t, x)
+            model_mean, model_log_variance = self.p_mean_variance(t, x, noise_pred)
+            x = model_mean + (t > 0) * jnp.exp(0.5 * model_log_variance) * noise
+            weights = jax.nn.softmax(model_q(x) / temperature)
+            indices = jax.random.categorical(resampling_key, jnp.log(weights), shape=(num_particles,))
+            x = x[indices]
+            return (x, key), None
+
+        t = jnp.arange(self.num_timesteps)[::-1]
+        (x, _), _ = jax.lax.scan(body_fn, (x, scan_key), (t, noise))
+        return x
+        
 
     def q_sample(self, t: int, x_start: jax.Array, noise: jax.Array):
         B = self.beta_schedule()

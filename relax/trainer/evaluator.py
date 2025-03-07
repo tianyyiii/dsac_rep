@@ -17,7 +17,7 @@ from tensorboardX import SummaryWriter
 from relax.env import create_env
 from relax.utils.persistence import PersistFunction
 
-def evaluate(env, policy_fn, policy_params, num_episodes, policy_root, render=True):
+def evaluate(env, policy_fn, policy_params, num_episodes, policy_root, render=False):
     ep_len_list = []
     ep_ret_list = []
     ep_success = 0
@@ -73,7 +73,9 @@ if __name__ == "__main__":
     env_seed, env_action_seed, policy_seed = map(int, master_rng.integers(0, 2**32 - 1, 3))
     env, _, _ = create_env(args.env, env_seed, args.obs_type, env_action_seed)
 
-    policy = PersistFunction.load(args.policy_root / "deterministic.pkl")
+    # policy = PersistFunction.load(args.policy_root / "deterministic.pkl")
+    policy = PersistFunction.load(args.policy_root / "smc.pkl")
+
     @jax.jit
     def policy_fn(policy_params, obs):
         return policy(policy_params, obs).clip(-1, 1)

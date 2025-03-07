@@ -60,6 +60,31 @@ class DiffRepNet:
             act = jnp.take_along_axis(acts, q_best_ind[..., None], axis=0).squeeze(axis=0)
         act = act + jax.random.normal(noise_key, act.shape) * jnp.exp(log_alpha) * self.noise_scale
         return act
+    
+    def get_smc_action(self, policy_params: hk.Params, obs: jax.Array) -> jax.Array:
+        key = random_key_from_data(obs)
+        policy_params, log_alpha, q1_params, q2_params = policy_params
+        obs_batched = jnp.broadcast_to(obs, (self.num_particles, obs.shape[-1]))
+
+        def model_fn(t, x):
+            return self.policy(policy_params, obs_batched, x, t)[1]
+        
+        def model_q(action): 
+            q1 = self.q(q1_params, obs_batched, action)
+            q2 = self.q(q2_params, obs_batched, action)
+            q = jnp.minimum(q1, q2)
+            return q
+
+        def sample(key: jax.Array) -> Union[jax.Array, jax.Array]:
+            act = self.diffusion.smc_p_sample(key, model_fn, model_q, (self.act_dim, ), self.num_particles)
+            q = model_q(act)
+            return act.clip(-1, 1), q
+
+        key, noise_key = jax.random.split(key)
+        acts, qs = sample(key)
+        max_idx = jnp.argmax(qs.squeeze())  
+        max_act = acts[max_idx]
+        return max_act
 
     def get_batch_actions(self, key: jax.Array, policy_params: hk.Params, obs: jax.Array, q_func: Callable) -> jax.Array:
         batch_flatten_obs = obs.repeat(self.num_particles, axis=0)
@@ -80,6 +105,7 @@ class DiffRepNet:
         log_alpha = -jnp.inf
         policy_params = (policy_params, log_alpha, q1_params, q2_params)
         return self.get_action(key, policy_params, obs)
+    
 
     def q_evaluate(
         self, key: jax.Array, q_params: hk.Params, obs: jax.Array, act: jax.Array

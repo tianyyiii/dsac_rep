@@ -12,10 +12,12 @@ from relax.utils.typing import Metric
 
 class Algorithm:
     # NOTE: a not elegant blanket implementation of the algorithm interface
-    def _implement_common_behavior(self, stateless_update, stateless_get_action, stateless_get_deterministic_action, stateless_get_value=None):
+    def _implement_common_behavior(self, stateless_update, stateless_get_action, stateless_get_deterministic_action, stateless_get_smc_action=None, stateless_get_value=None):
         self._update = jax.jit(stateless_update)
         self._get_action = jax.jit(stateless_get_action)
         self._get_deterministic_action = jax.jit(stateless_get_deterministic_action)
+        if stateless_get_smc_action is not None:
+            self._get_smc_action = jax.jit(stateless_get_smc_action)
         if stateless_get_value is not None:
             self._get_value = jax.jit(stateless_get_value)
 
@@ -56,6 +58,11 @@ class Algorithm:
         key = jax.random.key(0)
         stochastic = make_persist(self._get_action._fun)(key, self.get_policy_params(), dummy_obs)
         deterministic = make_persist(self._get_deterministic_action._fun)(self.get_policy_params(), dummy_obs)
+
+        if self._get_smc_action:
+            smc = make_persist(self._get_smc_action._fun)(self.get_policy_params(), dummy_obs)
+            smc.save(root / "smc.pkl")
+            smc.save_info(root / "smc.txt")
 
         stochastic.save(root / "stochastic.pkl")
         stochastic.save_info(root / "stochastic.txt")
