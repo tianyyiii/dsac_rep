@@ -24,6 +24,7 @@ __pycache__/
 
 test*.py
 scripts/inspect_results.py
+/relax/trainer/evaluator_test.py
 
 */.ipynb_checkpoints
 *.png

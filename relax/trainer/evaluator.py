@@ -73,8 +73,8 @@ if __name__ == "__main__":
     env_seed, env_action_seed, policy_seed = map(int, master_rng.integers(0, 2**32 - 1, 3))
     env, _, _ = create_env(args.env, env_seed, args.obs_type, env_action_seed)
 
-    # policy = PersistFunction.load(args.policy_root / "deterministic.pkl")
-    policy = PersistFunction.load(args.policy_root / "smc.pkl")
+    policy = PersistFunction.load(args.policy_root / "deterministic.pkl")
+    # policy = PersistFunction.load(args.policy_root / "smc.pkl")
 
     @jax.jit
     def policy_fn(policy_params, obs):

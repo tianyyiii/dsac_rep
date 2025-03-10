@@ -18,6 +18,8 @@ class Algorithm:
         self._get_deterministic_action = jax.jit(stateless_get_deterministic_action)
         if stateless_get_smc_action is not None:
             self._get_smc_action = jax.jit(stateless_get_smc_action)
+        else:
+            self._get_smc_action = None
         if stateless_get_value is not None:
             self._get_value = jax.jit(stateless_get_value)
 
