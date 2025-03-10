@@ -200,9 +200,9 @@ class OffPolicyTrainer:
                 command = f"{sl.sample_step},{self.log_path / policy_pkl_name}\n"
                 self.evaluator.stdin.write(command.encode())
 
-    def add_scalar(self, tag: str, value: float, step: int):
-        self.last_metrics[tag] = value
-        self.logger.add_scalar(tag, value, step)
+    def add_scalar(self, tag: str, value: float):
+        self.add_scalar.step = getattr(self.add_scalar, 'step', 0) + 1
+        self.logger.add_scalar(tag, value, self.add_scalar.step)
         self.logger.flush()
 
     def run(self, key: jax.Array):

@@ -28,11 +28,12 @@ options = {'move_speed': 1.0} # ignored if not walker-multi
 
 argparser = argparse.ArgumentParser()
 argparser.add_argument("--folder-path", type=str,
-                       default="logs/dsac/walker-walk-v0/sdac_2025-03-02_00-45-08_s100_test_use_atp1")
-argparser.add_argument("--num-simulations", type=int, default=10)
+                       default="walker-walk-v0/sdac_2025-03-02_00-45-08_s100_test_use_atp1")
+argparser.add_argument("--n-sims", type=int, default=10)
+
 args = argparser.parse_args()
-folder_path = args.folder_path
-n_sims = args.num_simulations
+folder_path = 'logs/dsac/' + args.folder_path
+n_sims = args.n_sims
 
 file = sorted([(int(op.basename(file).split('-')[1]), file)
                for file in glob.glob(op.join(folder_path, 'policy-*.pkl'))], key=lambda el: el[0])[-1][1]
