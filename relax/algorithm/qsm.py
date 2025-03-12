@@ -14,6 +14,7 @@ class QSMOptStates(NamedTuple):
     q1: optax.OptState
     q2: optax.OptState
     q_score: optax.OptState
+    log_alpha: optax.OptState
 
 class QSMTrainState(NamedTuple):
     params: QSMParams
@@ -21,11 +22,13 @@ class QSMTrainState(NamedTuple):
 
 
 class QSM(Algorithm):
-    def __init__(self, agent: QSMNet, params: QSMParams, *, gamma: float = 0.99, lr: float = 3e-4, tau: float = 0.005, lr_schedule_end=5e-5):
+    def __init__(self, agent: QSMNet, params: QSMParams, *, gamma: float = 0.99, lr: float = 3e-4, 
+                 alpha_lr: float = 3e-2, tau: float = 0.005, lr_schedule_end=5e-5):
         self.agent = agent
         self.gamma = gamma
         self.tau = tau
         self.optim = optax.adam(lr)
+        self.alpha_optim = optax.adam(alpha_lr)
         lr_schedule = optax.schedules.linear_schedule(
             init_value=lr,
             end_value=lr_schedule_end,
@@ -40,6 +43,7 @@ class QSM(Algorithm):
                 q1=self.optim.init(params.q1),
                 q2=self.optim.init(params.q2),
                 q_score=self.policy_optim.init(params.q_score),
+                log_alpha=self.alpha_optim.init(jnp.array(params.log_alpha)),
             ),
         )
 
@@ -48,12 +52,12 @@ class QSM(Algorithm):
             key: jax.Array, state: QSMTrainState, data: Experience
         ) -> Tuple[QSMTrainState, Metric]:
             obs, action, reward, next_obs, done = data.obs, data.action, data.reward, data.next_obs, data.done
-            q1_params, q2_params, target_q1_params, target_q2_params, q_score_params = state.params
-            q1_opt_state, q2_opt_state, q_score_opt_state = state.opt_state
+            q1_params, q2_params, target_q1_params, target_q2_params, q_score_params, log_alpha = state.params
+            q1_opt_state, q2_opt_state, q_score_opt_state, log_alpha_opt_state = state.opt_state
             next_action_key = key
 
             # compute target q
-            next_action = self.agent.get_action(next_action_key, (q_score_params, q1_params, q2_params), next_obs)
+            next_action = self.agent.get_action(next_action_key, (q_score_params, log_alpha, q1_params, q2_params), next_obs)
             q1_target = self.agent.q(target_q1_params, next_obs, next_action)
             q2_target = self.agent.q(target_q2_params, next_obs, next_action)
             q_target = jnp.minimum(q1_target, q2_target)
@@ -90,9 +94,25 @@ class QSM(Algorithm):
             target_q1_params = optax.incremental_update(q1_params, target_q1_params, self.tau)
             target_q2_params = optax.incremental_update(q2_params, target_q2_params, self.tau)
 
+            # update log_alpha
+            def log_alpha_loss_fn(log_alpha: jax.Array) -> jax.Array:
+                approx_entropy = 0.5 * self.agent.act_dim * \
+                    jnp.log(2 * jnp.pi * jnp.exp(1) *
+                            (0.1 * jnp.exp(log_alpha)) ** 2)
+                log_alpha_loss = -1 * log_alpha * \
+                    (-1 * jax.lax.stop_gradient(approx_entropy) +
+                     self.agent.target_entropy)
+                return log_alpha_loss
+
+            log_alpha_grads = jax.grad(log_alpha_loss_fn)(log_alpha)
+            update, log_alpha_opt_state = self.alpha_optim.update(
+                log_alpha_grads, log_alpha_opt_state)
+            log_alpha = optax.apply_updates(log_alpha, update)
+
             state = QSMTrainState(
-                params=QSMParams(q1_params, q2_params, target_q1_params, target_q2_params, q_score_params),
-                opt_state=QSMOptStates(q1_opt_state, q2_opt_state, q_score_opt_state),
+                params=QSMParams(q1_params, q2_params, target_q1_params,
+                                 target_q2_params, q_score_params, log_alpha),
+                opt_state=QSMOptStates(q1_opt_state, q2_opt_state, q_score_opt_state, log_alpha_opt_state),
             )
             info = {
                 "q1_loss": q1_loss,
@@ -100,10 +120,11 @@ class QSM(Algorithm):
                 "q1": jnp.mean(q1),
                 "q2": jnp.mean(q2),
                 "q_score_loss": q_score_loss,
+                "alpha": jnp.exp(log_alpha),
             }
             return state, info
 
         self._implement_common_behavior(stateless_update, self.agent.get_action, self.agent.get_deterministic_action)
 
     def get_policy_params(self):
-        return self.state.params.q_score, self.state.params.q1, self.state.params.q2
+        return self.state.params.q_score, self.state.params.log_alpha, self.state.params.q1, self.state.params.q2

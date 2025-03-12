@@ -1,11 +1,22 @@
 from typing import Protocol, Tuple
 from dataclasses import dataclass
+import math
 
 import jax, jax.numpy as jnp
 
 class ScoreModel(Protocol):
     def __call__(self, x: jax.Array) -> jax.Array:
         ...
+
+
+def cosine_beta_schedule(timesteps: int):
+    s = 0.008
+    t = jnp.arange(0, timesteps + 1) / timesteps
+    alphas_cumprod = jnp.cos((t + s) / (1 + s) * math.pi / 2) ** 2
+    alphas_cumprod /= alphas_cumprod[0]
+    betas = 1 - alphas_cumprod[1:] / alphas_cumprod[:-1]
+    betas = jnp.clip(betas, 0, 0.999)
+    return betas
 
 @dataclass(frozen=True)
 class LangevinDynamics:
@@ -20,9 +31,8 @@ class LangevinDynamics:
         # Bayesian Learning via Stochastic Gradient Langevin Dynamics
         # delta = a * (b + t) ^ (-gamma),  0.5 < gamma <= 1
         t = jnp.arange(self.num_timesteps)
-        # a, b, gamma = 1., 1., 1.
-        # delta = a * (b + t) ** -gamma
         delta = 1 - t/self.num_timesteps
+        #delta = cosine_beta_schedule(self.num_timesteps)[::-1]
 
         def body_fn(x, input):
             delta, noise = input

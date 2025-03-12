@@ -6,6 +6,7 @@ import haiku as hk
 
 from relax.network.blocks import Activation, QNet, QScoreNet
 from relax.utils.langevin import LangevinDynamics
+import math
 
 
 class QSMParams(NamedTuple):
@@ -14,6 +15,7 @@ class QSMParams(NamedTuple):
     target_q1: hk.Params
     target_q2: hk.Params
     q_score: hk.Params
+    log_alpha: jax.Array
 
 
 @dataclass
@@ -22,11 +24,13 @@ class QSMNet:
     q_score: Callable[[hk.Params, jax.Array, jax.Array], jax.Array]
     num_timesteps: int
     act_dim: int
-    num_particles: int = 1
+    num_particles: int
+    target_entropy: float
+    noise_scale: float
 
     def get_action(self, key: jax.Array, policy_params: hk.Params, obs: jax.Array, *, num_particles: Optional[int] = None) -> jax.Array:
         langevin = LangevinDynamics(self.num_timesteps)
-        score_params, q1_params, q2_params = policy_params
+        score_params, log_alpha, q1_params, q2_params = policy_params
         def model_fn(x):
             return self.q_score(score_params, obs, x)
 
@@ -38,6 +42,7 @@ class QSMNet:
             return act, q
 
         num_particles = num_particles if num_particles is not None else self.num_particles
+        key, noise_key = jax.random.split(key)
         assert num_particles > 0
         if num_particles == 1:
             act = langevin.sample(key, model_fn, (*obs.shape[:-1], self.act_dim))
@@ -46,11 +51,15 @@ class QSMNet:
             acts, qs = jax.vmap(sample)(keys)
             q_best_ind = jnp.argmax(qs, axis=0, keepdims=True)
             act = jnp.take_along_axis(acts, q_best_ind[..., None], axis=0).squeeze(axis=0)
+        act = act + \
+            jax.random.normal(noise_key, act.shape) * \
+            jnp.exp(log_alpha) * self.noise_scale
         return act
 
     def get_deterministic_action(self, policy_params: hk.Params, obs: jax.Array, *, num_particles: Optional[int] = None) -> jax.Array:
         # NOTE: Not sure if it is wise to get deterministic action from the score model
         key = jax.random.key(0)
+        policy_params = (policy_params[0], -jnp.inf, *policy_params[2:])
         return self.get_action(key, policy_params, obs, num_particles=num_particles)
 
     def get_q_score_from_gradient(self, q_params: hk.Params, obs: jax.Array, act: jax.Array) -> Tuple[jax.Array, jax.Array]:
@@ -68,6 +77,8 @@ def create_qsm_net(
     activation: Activation = jax.nn.relu,
     num_timesteps: int = 100,
     num_particles: int = 1,
+    target_entropy_scale: float = 0.9,
+    noise_scale: float = 0.1
 ) -> Tuple[QSMNet, QSMParams]:
     q = hk.without_apply_rng(hk.transform(lambda obs, act: QNet(hidden_sizes, activation)(obs, act)))
     q_score = hk.without_apply_rng(hk.transform(lambda obs, act: QScoreNet(hidden_sizes, activation)(obs, act)))
@@ -80,11 +91,14 @@ def create_qsm_net(
         target_q1_params = q1_params
         target_q2_params = q2_params
         q_score_params = q_score.init(q_score_key, obs, act)
-        return QSMParams(q1_params, q2_params, target_q1_params, target_q2_params, q_score_params)
+        log_alpha = jnp.array(math.log(5), dtype=jnp.float32)
+        return QSMParams(q1_params, q2_params, target_q1_params, target_q2_params, q_score_params, log_alpha)
 
     sample_obs = jnp.zeros((1, obs_dim))
     sample_act = jnp.zeros((1, act_dim))
     params = init(key, sample_obs, sample_act)
 
-    net = QSMNet(q=q.apply, q_score=q_score.apply, num_timesteps=num_timesteps, act_dim=act_dim, num_particles=num_particles)
+    net = QSMNet(q=q.apply, q_score=q_score.apply, num_timesteps=num_timesteps, 
+                 act_dim=act_dim, num_particles=num_particles,  
+                 target_entropy=-act_dim*target_entropy_scale, noise_scale=noise_scale)
     return net, params

@@ -106,7 +106,7 @@ def create_sdac_rep_net(
     feature = hk.without_apply_rng(hk.transform(lambda obs, act: FeatureNet(feature_hidden_sizes, feature_dim, activation)(obs, act)))
     
     mu = hk.without_apply_rng(hk.transform(lambda obs: mlp(
-        feature_hidden_sizes, feature_dim, activation, output_activation=Identity)(obs)))
+        feature_hidden_sizes, feature_dim, activation, output_activation=jax.nn.tanh)(obs)))
     
     theta = hk.without_apply_rng(hk.transform(lambda feature: hk.Linear(1)(feature).squeeze(-1)))
 
@@ -123,7 +123,7 @@ def create_sdac_rep_net(
         feature_params = feature.init(feature_key, obs, act)
         target_feature_params = feature_params
         mu_params = mu.init(mu_key, obs)
-        theta_params = theta.init(theta_key, obs)
+        theta_params = theta.init(theta_key, feat)
 
         log_alpha = jnp.array(math.log(5), dtype=jnp.float32) # math.log(3) or math.log(5) choose one
         return SDACRepParams(q1_params, q2_params, target_q1_params, target_q2_params, policy_params, 
