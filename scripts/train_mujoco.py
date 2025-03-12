@@ -56,6 +56,8 @@ if __name__ == "__main__":
     parser.add_argument("--target_entropy_scale", type=float, default=1.5)
     parser.add_argument("--debug", action='store_true', default=False)
     parser.add_argument("--rep_weight", type=float, default=0.0)
+    parser.add_argument("--pred_horizon", type=int, default=1)
+    parser.add_argument("--act_horizon", type=int, default=1)
     parser.add_argument("--use_ema_policy", default=True, action="store_true")
     args = parser.parse_args()
 
@@ -78,9 +80,9 @@ if __name__ == "__main__":
         obs_type = "state"
 
     if args.num_vec_envs > 0:
-        env, obs_dim, act_dim = create_vector_env(args.env, args.num_vec_envs, env_seed, env_action_seed, obs_type=obs_type, mode="futex")
+        env, obs_dim, act_dim = create_vector_env(args.env, args.num_vec_envs, env_seed, env_action_seed, obs_type=obs_type, mode="futex", pred_horizon=args.pred_horizon, act_horizon=args.act_horizon)
     else:
-        env, obs_dim, act_dim = create_env(args.env, env_seed, env_action_seed, obs_type=obs_type)
+        env, obs_dim, act_dim = create_env(args.env, env_seed, env_action_seed, obs_type=obs_type, pred_horizon=args.pred_horizon, act_horizon=args.act_horizon)
     eval_env = None
 
     hidden_sizes = [args.hidden_dim] * args.hidden_num
@@ -179,6 +181,8 @@ if __name__ == "__main__":
         save_policy_every=int(args.total_step / 40),
         warmup_with="random",
         log_path=exp_dir,
+        pred_horizon=args.pred_horizon,
+        act_horizon=args.act_horizon,
     )
 
     trainer.setup(Experience.create_example(obs_dim, act_dim, trainer.batch_size))

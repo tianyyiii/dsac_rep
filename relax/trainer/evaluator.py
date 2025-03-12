@@ -67,11 +67,13 @@ if __name__ == "__main__":
     parser.add_argument("--num_episodes", type=int, required=True)
     parser.add_argument("--seed", type=int, required=True)
     parser.add_argument("--obs_type", type=str, required=True)
+    parser.add_argument("--pred_horizon", type=str, required=True)
+    parser.add_argument("--act_horizon", type=str, required=True)
     args = parser.parse_args()
 
     master_rng = np.random.default_rng(args.seed)
     env_seed, env_action_seed, policy_seed = map(int, master_rng.integers(0, 2**32 - 1, 3))
-    env, _, _ = create_env(args.env, env_seed, args.obs_type, env_action_seed)
+    env, _, _ = create_env(args.env, env_seed, args.obs_type, env_action_seed, pred_horizon=int(args.pred_horizon), act_horizon=int(args.act_horizon))
 
     policy = PersistFunction.load(args.policy_root / "deterministic.pkl")
     # policy = PersistFunction.load(args.policy_root / "smc.pkl")

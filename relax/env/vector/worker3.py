@@ -11,7 +11,7 @@ from metaworld.envs import ALL_V2_ENVIRONMENTS_GOAL_OBSERVABLE
 import setproctitle
 from relax.prctl import set_client_pdeathsig
 from relax.futex import futex_client_wait, futex_client_notify
-from relax.env import MetaWorldWrapper, MultiTaskMetaWorldWrapper
+from relax.env import MetaWorldWrapper, MultiTaskMetaWorldWrapper, MPCWrapper
 
 import warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning, module=r"^gymnasium\.")
@@ -23,6 +23,8 @@ def parse_args():
     parser.add_argument("--index", type=str, required=True)
     parser.add_argument("--seed", type=str, required=True)
     parser.add_argument("--descr", type=str, required=True)
+    parser.add_argument("--pred_horizon", type=str, required=True)
+    parser.add_argument("--act_horizon", type=str, required=True)
     return parser.parse_args()
 
 def initialize_shm(descr, mode):
@@ -41,6 +43,10 @@ def main():
         if "metaworld" in args.env:
             env = ALL_V2_ENVIRONMENTS_GOAL_OBSERVABLE[args.env.split("/")[1]](seed=seed)
             env = MetaWorldWrapper(env, args.obs_type)
+        elif "mw-mpc" in args.env:
+            env = ALL_V2_ENVIRONMENTS_GOAL_OBSERVABLE[args.env.split("/")[1]](seed=seed)
+            env = MetaWorldWrapper(env, args.obs_type)   
+            env = MPCWrapper(env, int(args.pred_horizon), int(args.act_horizon))    
         elif "mt-10" in args.env:
             env_names = [
             'window-open-v2-goal-observable',

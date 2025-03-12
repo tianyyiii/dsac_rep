@@ -16,125 +16,12 @@ from metaworld.envs import ALL_V2_ENVIRONMENTS_GOAL_OBSERVABLE
 
 from relax.env.vector.base import VectorEnv
 from relax.futex import futex_server_wait, futex_server_notify
+from relax.env.env_wrapper import MetaWorldWrapper, MultiTaskMetaWorldWrapper, MPCWrapper
 
 WORKER_PATH = Path(__file__).parent / "worker3.py"
 
-class MetaWorldWrapper(Wrapper):
-    def __init__(self, env, obs_type="state", n_stack=2, max_episode_steps=500):
-        self.env = env
-        self.obs_type = obs_type
-        if self.obs_type == "image":
-            self.observation_space = Box(low=0, high=255, shape=(64 * 64 * 3 * n_stack,), dtype=np.uint8)
-        else:
-            self.observation_space = self.env.observation_space
-        self.action_space = self.env.action_space
-        self.n_stack = n_stack
-        self.frames = deque(maxlen=n_stack)
-        self.env._freeze_rand_vec = False
-        self._max_episode_steps = max_episode_steps
-        self._t = 0
-
-    def reset(self, **kwargs):
-        obs = self.env.reset()
-        self._t = 0
-        if self.obs_type == "image":
-            frame = self.env.render(offscreen=True, resolution=(64,64))
-            for _ in range(self.n_stack):
-                self.frames.append(frame)
-            obs = np.concatenate(list(self.frames), axis=2)
-            obs = obs.reshape(-1)
-        return obs, {}
-
-    def step(self, action):
-        total_reward = 0
-        for _ in range(2):
-            obs, reward, done, info = self.env.step(action.copy())
-            total_reward += reward
-            self._t += 1
-        if self.obs_type == "image":
-            frame = self.env.render(offscreen=True, resolution=(64, 64))
-            self.frames.append(frame)
-            obs = np.concatenate(list(self.frames), axis=2)
-            obs = obs.reshape(-1)
-        else:
-            obs = obs.astype(np.float32)
-        terminated = False
-        truncated = (self._t >= self._max_episode_steps)
-        return obs, total_reward, terminated, truncated, info
-
-    @property
-    def unwrapped(self):
-        return self.env.unwrapped
-    
-
-class MultiTaskMetaWorldWrapper(Wrapper):
-    def __init__(self, envs, obs_type="state", n_stack=2, max_episode_steps=500):
-        self.envs = envs
-        self.env_num = len(self.envs)
-        self.obs_type = obs_type
-        self.n_stack = n_stack
-        self.frames = deque(maxlen=n_stack)
-        for env in self.envs:
-            env._freeze_rand_vec = False
-        self._max_episode_steps = max_episode_steps
-        self._t = 0
-        self.env_index = random.randint(0, self.env_num - 1)
-        self.current_env = self.envs[self.env_index]
-        if self.obs_type == "image":
-            self.observation_space = Box(low=0, high=255, shape=(64 * 64 * 3 * n_stack,), dtype=np.uint8)
-        else:
-            orig_space = self.current_env.observation_space
-            low = np.concatenate([orig_space.low, np.array([-np.inf])])
-            high = np.concatenate([orig_space.high, np.array([np.inf])])
-            self.observation_space = Box(low=low, high=high, dtype=orig_space.dtype)
-        self.action_space = self.current_env.action_space
-
-    def reset(self, **kwargs):
-        self.env_index = random.randint(0, self.env_num - 1)
-        self.current_env = self.envs[self.env_index]
-        obs = self.current_env.reset()
-        self._t = 0
-        if self.obs_type == "image":
-            frame = self.current_env.render(offscreen=True, resolution=(64,64))
-            for _ in range(self.n_stack):
-                self.frames.append(frame)
-            obs = np.concatenate(list(self.frames), axis=2)
-            obs = obs.reshape(-1)
-        else:
-            env_idx_array = np.array([self.env_index], dtype=obs.dtype)
-            obs = np.concatenate([obs, env_idx_array], axis=0)
-        return obs, {}
-
-    def step(self, action):
-        total_reward = 0
-        for _ in range(2):
-            obs, reward, done, info = self.current_env.step(action.copy())
-            if self.obs_type == "state":
-                env_idx_array = np.array([self.env_index], dtype=obs.dtype)
-                obs = np.concatenate([obs, env_idx_array], axis=0)
-            total_reward += reward
-            self._t += 1
-        if self.obs_type == "image":
-            frame = self.current_env.render(offscreen=True, resolution=(64, 64))
-            self.frames.append(frame)
-            obs = np.concatenate(list(self.frames), axis=2)
-            obs = obs.reshape(-1)
-        else:
-            obs = obs.astype(np.float32)
-        terminated = False
-        truncated = (self._t >= self._max_episode_steps)
-        return obs, total_reward, terminated, truncated, info
-    
-    def close(self):
-        for env in self.envs:
-            env.close()
-
-    @property
-    def unwrapped(self):
-        return self.current_env.unwrapped
-
 class ProcessVectorEnv(VectorEnv):
-    def __init__(self, name: str, num_envs: int, seed: int, obs_type: str, *, num_workers: int = None):
+    def __init__(self, name: str, num_envs: int, seed: int, obs_type: str, pred_horizon : int = 1, act_horizon : int = 1, *, num_workers: int = None,):
         if num_workers is None:
             num_workers = num_envs
         else:
@@ -146,6 +33,10 @@ class ProcessVectorEnv(VectorEnv):
         if "metaworld" in name:
             dummy_env = ALL_V2_ENVIRONMENTS_GOAL_OBSERVABLE[name.split("/")[1]](seed=seed)
             dummy_env = MetaWorldWrapper(dummy_env, obs_type)
+        elif "mw-mpc" in name:
+            dummy_env = ALL_V2_ENVIRONMENTS_GOAL_OBSERVABLE[name.split("/")[1]](seed=seed)
+            dummy_env = MetaWorldWrapper(dummy_env, obs_type)   
+            dummy_env = MPCWrapper(dummy_env, pred_horizon, act_horizon)       
         elif "mt-10" in name:
             env_names = [
                 'window-open-v2-goal-observable',
@@ -231,6 +122,8 @@ class ProcessVectorEnv(VectorEnv):
                     "--index", ",".join(map(str, index)),
                     "--seed", ",".join(str(seeds[j]) for j in index),
                     "--descr", json.dumps(descr),
+                    "--pred_horizon", str(pred_horizon),
+                    "--act_horizon", str(act_horizon),
                 ],
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,

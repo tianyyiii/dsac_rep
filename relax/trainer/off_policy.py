@@ -27,7 +27,7 @@ class OffPolicyTrainer:
         algorithm: Algorithm,
         buffer: ExperienceBuffer,
         log_path: Path,
-        batch_size: int = 256,
+        batch_size: int = 16,
         start_step: int = 1000,
         total_step: int = int(1e6),
         sample_per_iteration: int = 1,
@@ -42,6 +42,8 @@ class OffPolicyTrainer:
         hparams: Optional[dict] = None,
         policy_pkl_template: str = "policy-{sample_step}-{update_step}.pkl",
         warmup_with: str = "random",  # "policy" or "random",
+        pred_horizon: int = 1,
+        act_horizon: int = 1,
     ):
         self.env = env
         self.env_name = env_name
@@ -63,6 +65,8 @@ class OffPolicyTrainer:
         self.save_policy_every = save_policy_every
         self.hparams = hparams
         self.warmup_with = warmup_with
+        self.pred_horizon = pred_horizon
+        self.act_horizon = act_horizon
 
         if isinstance(self.env.unwrapped, VectorEnv):
             self.is_vec = True
@@ -99,6 +103,8 @@ class OffPolicyTrainer:
                 "--num_episodes", str(self.evaluate_n_episode),
                 "--seed", str(0),
                 "--obs_type", obs_type,
+                "--pred_horizon", str(self.pred_horizon),
+                "--act_horizon", str(self.act_horizon),
             ],
             stdin=subprocess.PIPE,
             bufsize=0,
