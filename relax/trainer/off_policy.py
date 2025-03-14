@@ -27,7 +27,7 @@ class OffPolicyTrainer:
         algorithm: Algorithm,
         buffer: ExperienceBuffer,
         log_path: Path,
-        batch_size: int = 16,
+        batch_size: int = 256,
         start_step: int = 1000,
         total_step: int = int(1e6),
         sample_per_iteration: int = 1,

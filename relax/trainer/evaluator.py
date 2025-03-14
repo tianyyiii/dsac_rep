@@ -17,7 +17,7 @@ from tensorboardX import SummaryWriter
 from relax.env import create_env
 from relax.utils.persistence import PersistFunction
 
-def evaluate(env, policy_fn, policy_params, num_episodes, policy_root, render=False):
+def evaluate(env, policy_fn, policy_params, num_episodes, policy_root, act_reward=False, render=False):
     ep_len_list = []
     ep_ret_list = []
     ep_success = 0
@@ -30,6 +30,8 @@ def evaluate(env, policy_fn, policy_params, num_episodes, policy_root, render=Fa
             act = policy_fn(policy_params, obs)
             act = np.squeeze(act)
             obs, reward, terminated, truncated, info = env.step(act)
+            if act_reward:
+                reward = info["act_reward"]
             ep_len += 1
             ep_ret += reward
             if render and episode_i <= 10:
@@ -85,13 +87,17 @@ if __name__ == "__main__":
     # logger = SummaryWriter(args.policy_root)
     logger = Logger(args.policy_root)
 
+    act_reward = False
+    if "mw-mpc" in args.env:
+        act_reward = True
+
     while payload := sys.stdin.readline():
         step, policy_path = payload.strip().split(",", maxsplit=1)
         step = int(step)
         with open(policy_path, "rb") as f:
             policy_params = pickle.load(f)
 
-        ep_len_list, ep_ret_list, ep_success = evaluate(env, policy_fn, policy_params, args.num_episodes, args.policy_root)
+        ep_len_list, ep_ret_list, ep_success = evaluate(env, policy_fn, policy_params, args.num_episodes, args.policy_root, act_reward=act_reward)
 
         ep_len = np.array(ep_len_list)
         ep_ret = np.array(ep_ret_list)

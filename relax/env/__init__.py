@@ -64,7 +64,7 @@ def create_env(name: str, seed: int, obs_type: str = "state", action_seed: int =
         env = MetaWorldWrapper(env, obs_type)
     elif "mw-mpc" in name:
         env = ALL_V2_ENVIRONMENTS_GOAL_OBSERVABLE[name.split("/")[1]](seed=seed)
-        env = MetaWorldWrapper(env, obs_type)   
+        env = MetaWorldWrapper(env, obs_type, max_episode_steps=int(500 * pred_horizon / act_horizon + 1))   
         env = MPCWrapper(env, pred_horizon, act_horizon)    
     elif "mt-10" in name:
         env_names = [

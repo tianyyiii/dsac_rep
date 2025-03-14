@@ -47,6 +47,7 @@ class DiffRep(Algorithm):
         num_samples: int = 200,
         use_ema: bool = True,
         rep_weight: float = 1.0,
+        pred_horizon: int = 1,
     ):
         self.agent = agent
         self.gamma = gamma
@@ -89,6 +90,7 @@ class DiffRep(Algorithm):
         )
         self.use_ema = use_ema
         self.rep_weight = rep_weight
+        self.pred_horizon = pred_horizon
 
         @jax.jit
         def stateless_update(
@@ -121,7 +123,7 @@ class DiffRep(Algorithm):
             q1_target = self.agent.q(target_q1_params, next_obs, next_action)
             q2_target = self.agent.q(target_q2_params, next_obs, next_action)
             q_target = jnp.minimum(q1_target, q2_target)  # - jnp.exp(log_alpha) * next_logp
-            q_backup = reward + (1 - done) * self.gamma * q_target
+            q_backup = reward + (1 - done) * (self.gamma ** self.pred_horizon) * q_target
 
             def q_loss_fn(q_params: hk.Params) -> jax.Array:
                 q = self.agent.q(q_params, obs, action)

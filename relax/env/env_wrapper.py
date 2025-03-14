@@ -1,5 +1,6 @@
 from collections import deque
 import random
+import copy
 import numpy as np
 from gymnasium import Env, Wrapper, make
 from gymnasium.spaces import Box
@@ -18,6 +19,7 @@ class MetaWorldWrapper(Wrapper):
         self.env._freeze_rand_vec = False
         self._max_episode_steps = max_episode_steps
         self._t = 0
+        self.unwrapped.max_path_length = max_episode_steps
 
     def reset(self, **kwargs):
         obs = self.env.reset()
@@ -166,7 +168,7 @@ class MPCWrapper(Wrapper):
         actions_seq = actions.reshape(self.pred_horizon, -1)
 
         total_discounted_reward = 0.0
-        discount = 1.0
+        discount = self.gamma
         observations = []
         terminated = False
         truncated = False
@@ -182,6 +184,8 @@ class MPCWrapper(Wrapper):
                 skip_pred = True
                 break
         cur_state = self.unwrapped.get_env_state()
+        info["act_reward"] = total_discounted_reward
+        
         if not skip_pred:
             for act in actions_seq[self.act_horizon:]:
                 obs, reward, terminated, truncated, info = self.env.step(act.copy())
@@ -199,6 +203,7 @@ class MPCWrapper(Wrapper):
             truncated = True
 
         mpc_obs = np.concatenate(observations, axis=0)
+        
         return mpc_obs, total_discounted_reward, terminated, truncated, info
 
     @property
