@@ -247,18 +247,13 @@ class DiffusionRepPolicyNet(hk.Module):
     def __call__(self, obs: jax.Array, act: jax.Array, t: jax.Array) -> jax.Array:
         #w = hk.get_parameter("w", shape=[self.embedding_dim, 1], init=hk.initializers.VarianceScaling())
         act_dim = act.shape[-1]
-        te = scaled_sinusoidal_encoding(t, dim=self.time_dim, batch_shape=obs.shape[:-1])
+        te = scaled_sinusoidal_encoding(
+            t, dim=self.time_dim, batch_shape=obs.shape[:-1])
         te = hk.Linear(self.time_dim * 2)(te)
         te = self.activation(te)
         te = hk.Linear(self.time_dim)(te)
         input = jnp.concatenate((obs, act, te), axis=-1)
-        # phi_output = mlp(self.hidden_sizes, act_dim * self.embedding_dim, self.activation, self.output_activation)(input)
-        # if len(phi_output.shape) == 2:
-        #     phi_output = phi_output.reshape((phi_output.shape[0], act_dim, self.embedding_dim))
-        # elif len(phi_output.shape) == 1:
-        #     phi_output = phi_output.reshape((act_dim, self.embedding_dim))
-        #output = jnp.matmul(phi_output, w)
-        #output = jnp.squeeze(output, axis=-1)
+        
         phi_output = mlp(self.hidden_sizes, act_dim * self.embedding_dim, self.activation, self.output_activation)(input)
         output = hk.Linear(self.embedding_dim)(phi_output)
         output = self.activation(output)
@@ -268,6 +263,69 @@ class DiffusionRepPolicyNet(hk.Module):
         elif len(phi_output.shape) == 1:
             phi_output = phi_output.reshape((act_dim, self.embedding_dim))
         return phi_output, output
+    
+@dataclass
+@fix_repr
+class SDACRepPhiNet(hk.Module):
+    hidden_sizes: Sequence[int]
+    embedding_dim: int
+    activation: Activation
+    time_dim: int = 16
+    name: str = None
+
+    def __call__(self, obs: jax.Array, act: jax.Array, t: jax.Array) -> jax.Array:
+        
+        te = scaled_sinusoidal_encoding(
+            t, dim=self.time_dim, batch_shape=obs.shape[:-1])
+
+        te = hk.Linear(self.time_dim * 2)(te)
+        te = self.activation(te)
+        te = hk.Linear(self.time_dim)(te)
+        input = jnp.concatenate((obs, act, te), axis=-1)
+
+        phi_output = mlp(self.hidden_sizes, self.embedding_dim, self.activation, output_activation=Identity)(input)
+        return hk.LayerNorm(axis=-1, param_axis=-1, create_scale=True, create_offset=True)(phi_output)
+
+@dataclass
+@fix_repr
+class SDACRepDPhiDaNet(hk.Module):
+    '''
+        Optional network to learn DPhi/Da for SDACRep to accelerate sampling
+    '''
+    hidden_sizes: Sequence[int]
+    activation: Activation
+    embedding_dim: int = 256
+    time_dim: int = 16
+    name: str = None
+
+    def __call__(self, obs: jax.Array, act: jax.Array, t: jax.Array) -> jax.Array:
+        act_dim = act.shape[-1]
+        te = scaled_sinusoidal_encoding(
+            t, dim=self.time_dim, batch_shape=obs.shape[:-1])
+
+        te = hk.Linear(self.time_dim * 2)(te)
+        te = self.activation(te)
+        te = hk.Linear(self.time_dim)(te)
+        input = jnp.concatenate((obs, act, te), axis=-1)
+
+        phi_output = mlp(self.hidden_sizes, self.embedding_dim * act_dim,
+                         self.activation, output_activation=Identity)(input)
+        phi_output = phi_output.reshape(-1, self.embedding_dim, act_dim)
+        return phi_output
+
+@dataclass
+@fix_repr
+class SDACRepPolicyNet(hk.Module):
+    hidden_sizes: Sequence[int]
+    act_dim: int    
+    activation: Activation
+    name: str = None
+
+    def __call__(self, d_phi_d_a: jax.Array) -> jax.Array:
+        d_phi_d_a = d_phi_d_a.reshape(d_phi_d_a.shape[0], -1)
+        return mlp(self.hidden_sizes, self.act_dim, self.activation, output_activation=Identity)(d_phi_d_a)
+
+
     
     
 '''

@@ -36,32 +36,26 @@ from relax.utils.log_diff import log_git_details
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--alg", type=str, default="sdac_rep")
+    parser.add_argument("--alg", type=str, default="sdac-rep")
     parser.add_argument("--env", type=str, default="Ant-v4")
     parser.add_argument("--suffix", type=str, default="test_use_atp1")
     parser.add_argument("--num_vec_envs", type=int, default=5)
 
-    parser.add_argument("--hidden_num", type=int, default=2)
+    parser.add_argument("--hidden_num", type=int, default=1)
     parser.add_argument("--hidden_dim", type=int, default=512)
-    parser.add_argument("--diffusion_hidden_num", type=int, default=3)
-    parser.add_argument("--diffusion_hidden_dim", type=int, default=512)
-    parser.add_argument("--feature_hidden_num", type=int, default=2)
+    parser.add_argument("--feature_hidden_num", type=int, default=3)
     parser.add_argument("--feature_hidden_dim", type=int, default=512)
     parser.add_argument("--num_particles", type=int, default=32)
-    parser.add_argument("--noise_scale", type=float, default=0.1)
+    parser.add_argument("--noise_scale", type=float, default=0.1)   
     parser.add_argument("--batch_size", type=int, default=256)
 
     # for rep
-    parser.add_argument("--rep_embedding_dim", type=int, default=256) # this is multiplied by nu!
-
-    # for diff rep
-    parser.add_argument("--rep_weight", type=float, default=0.0)
-    parser.add_argument("--use_rff_critics", default=False, action="store_true")
+    parser.add_argument("--feat_dim", type=int, default=256)
     
     parser.add_argument("--diffusion_steps", type=int, default=20)
     parser.add_argument("--start_step", type=int, default=int(3e4)) # other envs 3e4
-    parser.add_argument("--total_step", type=int, default=int(2e6)) #1e6
-    parser.add_argument("--update_per_iteration", type=int, default=5)
+    parser.add_argument("--total_step", type=int, default=int(1e6)) #1e6
+    parser.add_argument("--update_per_iteration", type=int, default=1)
     parser.add_argument("--lr", type=float, default=3e-4)
     parser.add_argument("--lr_schedule_end", type=float, default=3e-5)
     parser.add_argument("--alpha_lr", type=float, default=7e-3)
@@ -94,105 +88,22 @@ if __name__ == "__main__":
     eval_env = None
 
     hidden_sizes = [args.hidden_dim] * args.hidden_num
-    diffusion_hidden_sizes = [args.diffusion_hidden_dim] * args.diffusion_hidden_num
     feature_hidden_sizes = [args.feature_hidden_dim] * args.feature_hidden_num
 
     gelu = partial(jax.nn.gelu, approximate=False)
 
-    if args.alg == 'sdac':
-        def mish(x: jax.Array):
-            return x * jnp.tanh(jax.nn.softplus(x))
-        agent, params = create_sdac_net(init_network_key, obs_dim, act_dim, hidden_sizes, diffusion_hidden_sizes, mish,
-                                          num_timesteps=args.diffusion_steps, 
-                                          num_particles=args.num_particles, 
-                                          noise_scale=args.noise_scale,
-                                          target_entropy_scale=args.target_entropy_scale)
-        algorithm = SDAC(agent, params, lr=args.lr, alpha_lr=args.alpha_lr, 
-                           delay_alpha_update=args.delay_alpha_update,
-                             lr_schedule_end=args.lr_schedule_end,
-                             use_ema=args.use_ema_policy)
-    elif args.alg == 'sdac_rep':
-        def mish(x: jax.Array):
-            return x * jnp.tanh(jax.nn.softplus(x))
-        agent, params = create_sdac_rep_net(init_network_key, obs_dim=obs_dim, act_dim=act_dim, feature_dim=args.rep_embedding_dim, 
-                                            hidden_sizes=hidden_sizes, diffusion_hidden_sizes=diffusion_hidden_sizes, 
-                                            feature_hidden_sizes=feature_hidden_sizes, activation=mish,
-                                            num_timesteps=args.diffusion_steps,
-                                            num_particles=args.num_particles,
-                                            noise_scale=args.noise_scale,
-                                            target_entropy_scale=args.target_entropy_scale)
-        algorithm = SDACRep(agent, params, lr=args.lr, alpha_lr=args.alpha_lr,
-                         delay_alpha_update=args.delay_alpha_update,
-                         lr_schedule_end=args.lr_schedule_end,
-                            use_ema=args.use_ema_policy, use_target_feature=True, reward_loss_wgt=0.0)
-    elif args.alg == 'diffrep':
-        def mish(x: jax.Array):
-            return x * jnp.tanh(jax.nn.softplus(x))
-        if args.use_rff_critics:
-            print('Setting warmup with to policy!')
-            args.warmup_with = "policy"
-
-        agent, params = create_diffrep_net(init_network_key, obs_dim, act_dim, hidden_sizes, diffusion_hidden_sizes, mish,
-                                          num_timesteps=args.diffusion_steps, 
-                                          num_particles=args.num_particles, 
-                                          noise_scale=args.noise_scale,
-                                          target_entropy_scale=args.target_entropy_scale,
-                                            rep_embedding_dim=args.rep_embedding_dim,
-                                           use_rff_critics=args.use_rff_critics)
-        algorithm = DiffRep(agent, params, lr=args.lr, alpha_lr=args.alpha_lr, 
-                           delay_alpha_update=args.delay_alpha_update,
-                             lr_schedule_end=args.lr_schedule_end,
-                            use_ema=args.use_ema_policy, rep_weight=args.rep_weight, use_rff_critics=args.use_rff_critics)
-        
-    elif args.alg == 'diffrep_image':
-        def mish(x: jax.Array):
-            return x * jnp.tanh(jax.nn.softplus(x))
-        agent, params = create_diffrep_image_net(init_network_key, obs_dim, act_dim, args.visual_embedding_dim, hidden_sizes, diffusion_hidden_sizes, mish,
-                                          num_timesteps=args.diffusion_steps, 
-                                          num_particles=args.num_particles, 
-                                          noise_scale=args.noise_scale,
-                                          target_entropy_scale=args.target_entropy_scale)
-        algorithm = DiffRepImage(agent, params, lr=args.lr, alpha_lr=args.alpha_lr, 
-                           delay_alpha_update=args.delay_alpha_update,
-                             lr_schedule_end=args.lr_schedule_end,
-                             use_ema=args.use_ema_policy, rep_weight=args.rep_weight)
-
-    elif args.alg == "qsm":
-        agent, params = create_qsm_net(init_network_key, obs_dim, act_dim, hidden_sizes, num_timesteps=20, num_particles=args.num_particles)
-        algorithm = QSM(agent, params, lr=args.lr, lr_schedule_end=args.lr_schedule_end)
-    elif args.alg == "sac":
-        agent, params = create_sac_net(init_network_key, obs_dim, act_dim, hidden_sizes, gelu)
-        algorithm = SAC(agent, params, lr=args.lr)
-    elif args.alg == "dacer":
-        def mish(x: jax.Array):
-            return x * jnp.tanh(jax.nn.softplus(x))
-        agent, params = create_dacer_net(init_network_key, obs_dim, act_dim, hidden_sizes, diffusion_hidden_sizes, mish, 
-                                         num_timesteps=args.diffusion_steps)
-        algorithm = DACER(agent, params, lr=args.lr, lr_schedule_end=args.lr_schedule_end)
-    elif args.alg == "dipo":
-        diffusion_buffer = TreeBuffer.from_example(
-            ObsActionPair.create_example(obs_dim, act_dim),
-            args.total_step,
-            int(master_rng.integers(0, 2**32 - 1)),
-            remove_batch_dim=False
-        )
-        TreeBuffer.connect(buffer, diffusion_buffer, lambda exp: ObsActionPair(exp.obs, exp.action))
-
-        def mish(x: jax.Array):
-            return x * jnp.tanh(jax.nn.softplus(x))
-
-        agent, params = create_dipo_net(init_network_key, obs_dim, act_dim, hidden_sizes, num_timesteps=100)
-        algorithm = DIPO(agent, params, diffusion_buffer, lr=args.lr, action_gradient_steps=30, policy_target_delay=2, action_grad_norm=0.16)
-    elif args.alg == "qvpo":
-        def mish(x: jax.Array):
-            return x * jnp.tanh(jax.nn.softplus(x))
-        agent, params = create_qvpo_net(init_network_key, obs_dim, act_dim, hidden_sizes, diffusion_hidden_sizes, mish,
-                                          num_timesteps=args.diffusion_steps,
-                                          num_particles=args.num_particles,
-                                          noise_scale=args.noise_scale)
-        algorithm = QVPO(agent, params, lr=args.lr, alpha_lr=args.alpha_lr, delay_alpha_update=args.delay_alpha_update)
-    else:
-        raise ValueError(f"Invalid algorithm {args.alg}!")
+    def mish(x: jax.Array):
+        return x * jnp.tanh(jax.nn.softplus(x))
+    agent, params = create_sdac_rep_net(init_network_key, obs_dim=obs_dim, act_dim=act_dim, feature_dim=args.feat_dim, 
+                                        hidden_sizes=hidden_sizes, activation=mish, feature_hidden_sizes=feature_hidden_sizes,
+                                        num_timesteps=args.diffusion_steps,
+                                        num_particles=args.num_particles,
+                                        noise_scale=args.noise_scale,
+                                        target_entropy_scale=args.target_entropy_scale)
+    algorithm = SDACRep(agent, params, lr=args.lr, alpha_lr=args.alpha_lr,
+                        delay_alpha_update=args.delay_alpha_update,
+                        lr_schedule_end=args.lr_schedule_end,
+                        use_ema=args.use_ema_policy, use_target_feature=True)
 
     exp_dir = PROJECT_ROOT / "logs" / args.env / (args.alg + '_' + time.strftime("%Y-%m-%d_%H-%M-%S") + f'_s{args.seed}_{args.suffix}')
     if isinstance(algorithm, DiffRep) and algorithm.use_rff_critics:
