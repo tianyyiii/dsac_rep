@@ -184,7 +184,7 @@ class MPCWrapper(Wrapper):
                 skip_pred = True
                 break
         cur_state = self.unwrapped.get_env_state()
-        info["act_reward"] = total_discounted_reward
+        act_reward = total_discounted_reward
         
         if not skip_pred:
             for act in actions_seq[self.act_horizon:]:
@@ -203,6 +203,7 @@ class MPCWrapper(Wrapper):
             truncated = True
 
         mpc_obs = np.concatenate(observations, axis=0)
+        info["act_reward"] = act_reward
         
         return mpc_obs, total_discounted_reward, terminated, truncated, info
 

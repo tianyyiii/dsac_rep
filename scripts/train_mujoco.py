@@ -14,6 +14,7 @@ from relax.algorithm.dipo import DIPO
 from relax.algorithm.qvpo import QVPO
 from relax.algorithm.sdac import SDAC
 from relax.algorithm.diffrep import DiffRep
+from relax.algorithm.diffurep import DiffURep
 from relax.algorithm.diffrep_image import DiffRepImage
 from relax.buffer import TreeBuffer
 from relax.network.sac import create_sac_net
@@ -22,6 +23,7 @@ from relax.network.qsm import create_qsm_net
 from relax.network.dipo import create_dipo_net
 from relax.network.sdac import create_sdac_net
 from relax.network.diffrep import create_diffrep_net
+from relax.network.diffurep import create_diffurep_net
 from relax.network.diffrep_image import create_diffrep_image_net
 from relax.network.qvpo import create_qvpo_net
 from relax.trainer.off_policy import OffPolicyTrainer
@@ -114,6 +116,19 @@ if __name__ == "__main__":
                                           noise_scale=args.noise_scale,
                                           target_entropy_scale=args.target_entropy_scale)
         algorithm = DiffRep(agent, params, lr=args.lr, alpha_lr=args.alpha_lr, 
+                           delay_alpha_update=args.delay_alpha_update,
+                             lr_schedule_end=args.lr_schedule_end,
+                             use_ema=args.use_ema_policy, rep_weight=args.rep_weight, pred_horizon=args.pred_horizon)
+        
+    elif args.alg == 'diffurep':
+        def mish(x: jax.Array):
+            return x * jnp.tanh(jax.nn.softplus(x))
+        agent, params = create_diffurep_net(init_network_key, obs_dim, act_dim, hidden_sizes, diffusion_hidden_sizes, mish,
+                                          num_timesteps=args.diffusion_steps, 
+                                          num_particles=args.num_particles, 
+                                          noise_scale=args.noise_scale,
+                                          target_entropy_scale=args.target_entropy_scale)
+        algorithm = DiffURep(agent, params, lr=args.lr, alpha_lr=args.alpha_lr, 
                            delay_alpha_update=args.delay_alpha_update,
                              lr_schedule_end=args.lr_schedule_end,
                              use_ema=args.use_ema_policy, rep_weight=args.rep_weight, pred_horizon=args.pred_horizon)

@@ -210,20 +210,12 @@ class DiffusionRepPolicyNet(hk.Module):
     name: str = None
 
     def __call__(self, obs: jax.Array, act: jax.Array, t: jax.Array) -> jax.Array:
-        #w = hk.get_parameter("w", shape=[self.embedding_dim, 1], init=hk.initializers.VarianceScaling())
         act_dim = act.shape[-1]
         te = scaled_sinusoidal_encoding(t, dim=self.time_dim, batch_shape=obs.shape[:-1])
         te = hk.Linear(self.time_dim * 2)(te)
         te = self.activation(te)
         te = hk.Linear(self.time_dim)(te)
         input = jnp.concatenate((obs, act, te), axis=-1)
-        # phi_output = mlp(self.hidden_sizes, act_dim * self.embedding_dim, self.activation, self.output_activation)(input)
-        # if len(phi_output.shape) == 2:
-        #     phi_output = phi_output.reshape((phi_output.shape[0], act_dim, self.embedding_dim))
-        # elif len(phi_output.shape) == 1:
-        #     phi_output = phi_output.reshape((act_dim, self.embedding_dim))
-        #output = jnp.matmul(phi_output, w)
-        #output = jnp.squeeze(output, axis=-1)
         phi_output = mlp(self.hidden_sizes, act_dim * self.embedding_dim, self.activation, self.output_activation)(input)
         output = hk.Linear(self.embedding_dim)(phi_output)
         output = self.activation(output)
@@ -250,6 +242,93 @@ class DiffusionRepMuNet(hk.Module):
     def __call__(self, next_obs: jax.Array) -> jax.Array:
         output = mlp(self.hidden_sizes, self.embedding_dim, self.activation, self.output_activation)(next_obs)
         return output
+    
+'''
+-----------------------------For unified representation-----------------------------------------------------------
+'''
+
+@dataclass
+@fix_repr
+class URepQNet(hk.Module):
+    hidden_sizes: Sequence[int]
+    activation: Activation
+    output_activation: Activation = Identity
+    name: str = None
+
+    def __call__(self, feature: jax.Array) -> jax.Array:
+        return mlp(self.hidden_sizes, 1, self.activation, self.output_activation, squeeze_output=True)(feature)
+    
+
+@dataclass
+@fix_repr
+class URepPolicyNet(hk.Module):
+    hidden_sizes: Sequence[int]
+    activation: Activation
+    act_dim: int = 4
+    embedding_dim: int = 256
+    output_activation: Activation = Identity
+    name: str = None
+
+    def __call__(self, feature: jax.Array) -> jax.Array:
+        return mlp(self.hidden_sizes, self.act_dim, self.activation, self.output_activation, squeeze_output=False)(feature)
+    
+
+# For the unified feature [\phi(s,\tilde{a}; \beta), \log Z(s,\tilde{a}; \beta)]
+@dataclass
+@fix_repr
+class URepPhiNet(hk.Module):
+    hidden_sizes: Sequence[int]
+    activation: Activation
+    output_activation: Activation = Identity
+    embedding_dim: int = 256
+    time_dim: int = 16
+    name: str = None
+
+    def __call__(self, obs: jax.Array, act: jax.Array, t: jax.Array) -> jax.Array:
+        if jnp.ndim(t) == 0 and jnp.ndim(obs) > 1:
+            t = jnp.broadcast_to(t, obs.shape[0])
+        te = scaled_sinusoidal_encoding(t, dim=self.time_dim, batch_shape=obs.shape[:-1])
+        te = hk.Linear(self.time_dim * 2)(te)
+        te = self.activation(te)
+        te = hk.Linear(self.time_dim)(te)
+        input = jnp.concatenate((obs, act, te), axis=-1)
+        phi_output = mlp(self.hidden_sizes, self.embedding_dim, self.activation, self.output_activation)(input)
+        return phi_output
+    
+
+@dataclass
+@fix_repr
+class URepMuNet(hk.Module):
+    hidden_sizes: Sequence[int]
+    activation: Activation
+    output_activation: Activation = Identity
+    embedding_dim: int = 256
+    name: str = None
+
+    def __call__(self, next_obs: jax.Array) -> jax.Array:
+        output = mlp(self.hidden_sizes, self.embedding_dim, self.activation, self.output_activation)(next_obs)
+        return output
+    
+@dataclass
+@fix_repr
+class URepGradNet(hk.Module):
+    activation: Activation
+    hidden_sizes: Sequence[int] = ()
+    output_activation: Activation = Identity
+    act_dim: int = 4
+    embedding_dim: int = 256
+    name: str = None
+
+    def __call__(self, feature: jax.Array) -> jax.Array:
+        output = mlp(self.hidden_sizes, self.embedding_dim * self.act_dim, self.activation, self.output_activation)(feature)
+        return output
+    
+
+    
+'''
+-----------------------------------------------------------------------------------------------------------------------
+'''
+
 
 def mlp(hidden_sizes: Sequence[int], output_size: int, activation: Activation, output_activation: Activation, *, squeeze_output: bool = False) -> Callable[[jax.Array], jax.Array]:
     layers = []
