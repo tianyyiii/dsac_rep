@@ -38,12 +38,22 @@ class QSMRepNet:
     theta: Callable[[hk.Params, jax.Array], jax.Array]
     target_entropy: float
     noise_scale: float
+    use_true_scores: bool
 
     def get_action(self, key: jax.Array, policy_params: hk.Params, obs: jax.Array, *, num_particles: Optional[int] = None) -> jax.Array:
         langevin = LangevinDynamics(self.num_timesteps)
         score_params, log_alpha, q1_params, q2_params, feat_params, _, _ = policy_params
         def model_fn(x):
-            return self.q_score(score_params, obs, x)
+            if self.use_true_scores:
+                def q(x):
+                    feats = self.feature(feat_params, obs, x)
+                    q1 = self.q(q1_params, feats)
+                    q2 = self.q(q2_params, feats)
+                    return jnp.minimum(q1, q2).sum()
+                return jax.grad(q)(x)
+            else:
+                return self.q_score(score_params, obs, x)
+                
 
         def sample(key):
             act = langevin.sample(key, model_fn, (*obs.shape[:-1], self.act_dim))
@@ -92,7 +102,8 @@ def create_qsm_rep_net(
     num_timesteps: int = 100,
     num_particles: int = 1,
     target_entropy_scale: float = 0.9,
-    noise_scale: float = 0.1
+    noise_scale: float = 0.1,
+    use_true_scores: bool = False
 ) -> Tuple[QSMRepNet, QSMRepParams]:
     q = hk.without_apply_rng(hk.transform(lambda feature: mlp(
         hidden_sizes, 1, activation, output_activation=Identity, squeeze_output=True)(feature)))
@@ -134,5 +145,5 @@ def create_qsm_rep_net(
 
     net = QSMRepNet(q=q.apply, q_score=q_score.apply, num_timesteps=num_timesteps, 
                     act_dim=act_dim, num_particles=num_particles, feature=feature.apply, mu=mu.apply, 
-                    theta=theta.apply, target_entropy=-act_dim*target_entropy_scale, noise_scale=noise_scale)
+                    theta=theta.apply, target_entropy=-act_dim*target_entropy_scale, noise_scale=noise_scale, use_true_scores=use_true_scores)
     return net, params

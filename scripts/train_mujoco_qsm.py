@@ -22,21 +22,22 @@ from relax.utils.log_diff import log_git_details
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--alg", type=str, default="sdac")
-    parser.add_argument("--env", type=str, default="Ant-v4")
+    parser.add_argument("--alg", type=str, default="qsm-rep")
+    parser.add_argument("--env", type=str, default="Hopper-v4")
     parser.add_argument("--suffix", type=str, default="test_use_atp1")
     parser.add_argument("--num_vec_envs", type=int, default=5)
 
-    parser.add_argument("--feat_dim", type=int, default=1024)
+    parser.add_argument("--feat_dim", type=int, default=2048)
     parser.add_argument("--feat_hidden_dim", type=int, default=1024)
-    parser.add_argument("--feat_hidden_num", type=int, default=1)
+    parser.add_argument("--feat_hidden_num", type=int, default=2)
     parser.add_argument("--hidden_dim", type=int, default=1024)
     parser.add_argument("--hidden_num", type=int, default=1)
     parser.add_argument("--score_hidden_dim", type=int, default=1024)
-    parser.add_argument("--score_hidden_num", type=int, default=1)
+    parser.add_argument("--score_hidden_num", type=int, default=2)
     parser.add_argument("--num_particles", type=int, default=32)
     parser.add_argument("--noise_scale", type=float, default=0.1)
     parser.add_argument("--batch_size", type=int, default=256)
+    parser.add_argument("--use_true_scores", default=False, action="store_true")
     
     parser.add_argument("--diffusion_steps", type=int, default=20)
     parser.add_argument("--start_step", type=int, default=30_000) # other envs 3e4
@@ -80,6 +81,7 @@ if __name__ == "__main__":
     gelu = partial(jax.nn.gelu, approximate=False)
 
     if args.alg == "qsm":
+        assert not args.use_true_scores, "True scores are not supported in QSM"
         agent, params = create_qsm_net(init_network_key, obs_dim, act_dim, hidden_sizes,
                                        num_timesteps=args.diffusion_steps, num_particles=args.num_particles,
                                        target_entropy_scale=args.target_entropy_scale, noise_scale=args.noise_scale)
@@ -89,8 +91,8 @@ if __name__ == "__main__":
         agent, params = create_qsm_rep_net(init_network_key, obs_dim=obs_dim, act_dim=act_dim, feature_dim=args.feat_dim,
                                            score_hidden_sizes=score_hidden_sizes, hidden_sizes=hidden_sizes, 
                                            feature_hidden_sizes=feature_hidden_sizes, target_entropy_scale=args.target_entropy_scale,
-                                           num_timesteps=args.diffusion_steps, num_particles=args.num_particles, noise_scale=args.noise_scale)
-        algorithm = QSMRep(agent, params, lr=args.lr, alpha_lr=args.alpha_lr, lr_schedule_end=args.lr_schedule_end)
+                                           num_timesteps=args.diffusion_steps, num_particles=args.num_particles, noise_scale=args.noise_scale, use_true_scores=args.use_true_scores)
+        algorithm = QSMRep(agent, params, lr=args.lr, alpha_lr=args.alpha_lr, lr_schedule_end=args.lr_schedule_end, use_true_scores=args.use_true_scores)
     else:
         raise ValueError(f"Invalid algorithm {args.alg}!")
 

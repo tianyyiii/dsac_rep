@@ -37,7 +37,8 @@ class QSMRep(Algorithm):
                  lr_schedule_end=5e-5,
                  delay_update: int = 2,
                  use_target_feature: bool = True,
-                 reward_loss_wgt: int = 0.5):
+                 reward_loss_wgt: int = 0.5,
+                 use_true_scores: bool = False):
         
         self.agent = agent
         self.gamma = gamma
@@ -47,6 +48,7 @@ class QSMRep(Algorithm):
         self.reward_loss_wgt = reward_loss_wgt
         self.optim = optax.adam(lr)
         self.alpha_optim = optax.adam(alpha_lr)
+        self.use_true_scores = use_true_scores
         lr_schedule = optax.schedules.linear_schedule(
             init_value=lr,
             end_value=lr_schedule_end,
@@ -141,24 +143,30 @@ class QSMRep(Algorithm):
             q2_params = optax.apply_updates(q2_params, q2_update)
 
             # update q_score
-            def q_score_loss_fn(q_score_params: hk.Params) -> jax.Array:
-                q1, q1_score = self.agent.get_q_score_from_gradient(
-                    act_feat_params, q1_params, obs, action)
-                q2, q2_score = self.agent.get_q_score_from_gradient(
-                    act_feat_params, q2_params, obs, action)
-                q_score = self.agent.q_score(q_score_params, obs, action)
-                q_minimum_score = jnp.where(
-                    q1.reshape(-1, 1) < q2.reshape(-1, 1), q1_score, q2_score)
-                q_score_loss = jnp.mean((q_score - q_minimum_score) ** 2)
-                return q_score_loss, (q1, q2)
+            q_score_metric_dct = {}
+            if not self.use_true_scores:
+                def q_score_loss_fn(q_score_params: hk.Params) -> jax.Array:
+                    q1, q1_score = self.agent.get_q_score_from_gradient(
+                        act_feat_params, q1_params, obs, action)
+                    q2, q2_score = self.agent.get_q_score_from_gradient(
+                        act_feat_params, q2_params, obs, action)
+                    q_score = self.agent.q_score(q_score_params, obs, action)
+                    q_minimum_score = jnp.where(
+                        q1.reshape(-1, 1) < q2.reshape(-1, 1), q1_score, q2_score)
+                    q_score_loss = jnp.mean((q_score - q_minimum_score) ** 2)
+                    return q_score_loss, (q1, q2)
 
-            (q_score_loss, aux), q_score_grads = jax.value_and_grad(
-                q_score_loss_fn, has_aux=True)(q_score_params)
-            q1, q2 = aux
-            q_score_update, q_score_opt_state = self.policy_optim.update(
-                q_score_grads, q_score_opt_state)
-            q_score_params = optax.apply_updates(
-                q_score_params, q_score_update)
+                (q_score_loss, aux), q_score_grads = jax.value_and_grad(
+                    q_score_loss_fn, has_aux=True)(q_score_params)
+                q1, q2 = aux
+                q_score_update, q_score_opt_state = self.policy_optim.update(
+                    q_score_grads, q_score_opt_state)
+                q_score_params = optax.apply_updates(
+                    q_score_params, q_score_update)
+                
+                q_score_metric_dct['q1'] = jnp.mean(q1)
+                q_score_metric_dct['q2'] = jnp.mean(q2)
+                q_score_metric_dct['q_score_loss'] = q_score_loss
             
             # update target q
             target_q1_params = optax.incremental_update(
@@ -191,13 +199,11 @@ class QSMRep(Algorithm):
             info = {
                 "q1_loss": q1_loss,
                 "q2_loss": q2_loss,
-                "q1": jnp.mean(q1),
-                "q2": jnp.mean(q2),
-                "q_score_loss": q_score_loss,
                 'r_loss': r_loss,
                 'feature_ce_loss': ce,
                 'total_feature_loss': feat_loss,
                 "alpha": jnp.exp(log_alpha),
+                **q_score_metric_dct
             }
             return state, info
 
