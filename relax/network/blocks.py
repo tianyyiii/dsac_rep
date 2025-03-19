@@ -266,7 +266,7 @@ class DiffusionRepPolicyNet(hk.Module):
     
 @dataclass
 @fix_repr
-class SDACRepPhiNet(hk.Module):
+class UDiffRepPhiNet(hk.Module):
     hidden_sizes: Sequence[int]
     embedding_dim: int
     activation: Activation
@@ -288,9 +288,9 @@ class SDACRepPhiNet(hk.Module):
 
 @dataclass
 @fix_repr
-class SDACRepDPhiDaNet(hk.Module):
+class UDiffRepDPhiDaNet(hk.Module):
     '''
-        Optional network to learn DPhi/Da for SDACRep to accelerate sampling
+        Optional network to learn DPhi/Da for UDiffRep to accelerate sampling
     '''
     hidden_sizes: Sequence[int]
     activation: Activation
@@ -315,7 +315,7 @@ class SDACRepDPhiDaNet(hk.Module):
 
 @dataclass
 @fix_repr
-class SDACRepPolicyNet(hk.Module):
+class UDiffRepPolicyNet(hk.Module):
     hidden_sizes: Sequence[int]
     act_dim: int    
     activation: Activation
