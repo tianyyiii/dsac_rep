@@ -3,6 +3,8 @@ import numpy as np
 from gymnasium import Env, Wrapper, make
 from gymnasium.spaces import Box
 from .dmc import DogWrapper
+from .pendulum import PendulumEnv
+from .cartpole import CartpoleEnv
 from metaworld.envs import ALL_V2_ENVIRONMENTS_GOAL_OBSERVABLE
 
 from relax.env.vector import VectorEnv, SerialVectorEnv, GymProcessVectorEnv, PipeProcessVectorEnv, SpinlockProcessVectorEnv, FutexProcessVectorEnv

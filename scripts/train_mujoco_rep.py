@@ -52,15 +52,15 @@ if __name__ == "__main__":
     parser.add_argument("--noise_scale", type=float, default=0.1)
     parser.add_argument("--batch_size", type=int, default=256)
     # for rep
-    parser.add_argument("--feat_dim", type=int, default=2048)  # this is multiplied by nu!
+    parser.add_argument("--feat_dim", type=int, default=2048) 
     parser.add_argument("--reward_loss_wgt", type=float, default=0.5)
 
 
     parser.add_argument("--diffusion_steps", type=int, default=20)
     parser.add_argument("--start_step", type=int,
                         default=int(3e4))  # other envs 3e4
-    parser.add_argument("--total_step", type=int, default=int(2e6))  # 1e6
-    parser.add_argument("--update_per_iteration", type=int, default=5)
+    parser.add_argument("--total_step", type=int, default=int(1e6))  # 1e6
+    parser.add_argument("--update_per_iteration", type=int, default=1)
     parser.add_argument("--lr", type=float, default=3e-4)
     parser.add_argument("--lr_schedule_end", type=float, default=3e-5)
     parser.add_argument("--alpha_lr", type=float, default=7e-3)
@@ -102,7 +102,7 @@ if __name__ == "__main__":
     assert args.alg == "sdac_rep", "Only SDAC-Rep is supported in this script"
 
     def mish(x: jax.Array):
-            return x * jnp.tanh(jax.nn.softplus(x))
+        return x * jnp.tanh(jax.nn.softplus(x))
     agent, params = create_sdac_rep_net(init_network_key, obs_dim=obs_dim, act_dim=act_dim, feature_dim=args.feat_dim,
                                         hidden_sizes=hidden_sizes, diffusion_hidden_sizes=diffusion_hidden_sizes,
                                         feature_hidden_sizes=feature_hidden_sizes, activation=mish,

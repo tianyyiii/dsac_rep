@@ -52,9 +52,31 @@ class FeatureNet(hk.Module):
         input = jnp.concatenate((obs, act), axis=-1)
         out = mlp(self.hidden_sizes, self.feature_size, self.activation, self.output_activation)(input)
         return hk.LayerNorm(axis=-1, param_axis=-1, create_scale=True, create_offset=True)(out)
+
+def normal_init(shape, dtype):
+    return jax.random.normal(hk.next_rng_key(), shape, dtype)
+
+def bias_init(shape, dtype):
+    return jax.random.uniform(hk.next_rng_key(), shape, dtype) * 2 * jnp.pi
+
+@dataclass
+@fix_repr
+class MBCriticNet(hk.Module):
+    feature_size: int
+    name: str = None
+
+    def __call__(self, next_obs: jax.Array) -> jax.Array:
+        nx = next_obs.shape[-1]
+        feat_w = hk.get_state("feat_w", shape=(nx, self.feature_size), dtype=jnp.float32, 
+                              init=lambda shape, dtype: normal_init(shape, dtype))
+        feat_b = hk.get_state("feat_b", shape=(self.feature_size), dtype=jnp.float32, 
+                              init=lambda shape, dtype: bias_init(shape, dtype))
+
+        out = jnp.cos(jnp.squeeze(next_obs[..., None, :] @ feat_w, axis=-2) + feat_b)
+        out = 10 * hk.LayerNorm(axis=-1, param_axis=-1, create_scale=True, create_offset=True)(out)
+        return hk.Linear(1)(out).squeeze(-1)
+
     
-
-
 @dataclass
 @fix_repr
 class RFFQNet(hk.Module):

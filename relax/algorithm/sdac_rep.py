@@ -59,6 +59,7 @@ class SDACRep(Algorithm):
         self.num_samples = num_samples
         self.use_target_feature = use_target_feature
         self.reward_loss_wgt = reward_loss_wgt
+        self.feature_optim = optax.adam(lr) 
         self.optim = optax.adam(lr)
         lr_schedule = optax.schedules.linear_schedule(
             init_value=lr,
@@ -77,9 +78,9 @@ class SDACRep(Algorithm):
                 q2=self.optim.init(params.q2),
                 policy=self.policy_optim.init(params.policy),
                 log_alpha=self.alpha_optim.init(params.log_alpha),
-                feature=self.optim.init({'feature': params.feature,
-                                         'mu': params.mu,
-                                         'theta': params.theta}),
+                feature=self.feature_optim.init({'feature': params.feature,
+                                                 'mu': params.mu,
+                                                 'theta': params.theta}),
             ),
             step=jnp.int32(0),
             entropy=jnp.float32(0.0),
@@ -117,21 +118,19 @@ class SDACRep(Algorithm):
                 feat = self.agent.feature(params['feature'], obs, action)
                 mu = self.agent.mu(params['mu'], next_obs)
 
-                labels = jnp.eye(obs.shape[0])
                 contrastive = jnp.sum(feat[:, None, :] * mu[None, :, :], axis=-1)
-                ce = -jnp.sum(labels * jax.nn.log_softmax(contrastive))
-                feature_loss = ce / obs.shape[0]
+                ce = -jnp.mean(jnp.diag(jax.nn.log_softmax(contrastive)))
                 r_loss = 0.0
                 if self.reward_loss_wgt > 0:
                     rhat = self.agent.theta(params['theta'], feat)
                     r_loss = jnp.mean((rhat - reward) ** 2)
-                feature_loss += self.reward_loss_wgt * r_loss
-                return feature_loss, (r_loss, ce)
+                feature_loss = ce + self.reward_loss_wgt * r_loss
+                return feature_loss, (ce, r_loss)
 
             feat_step_params = {'feature': feat_params, 'mu': mu_params, 'theta': theta_params}
-            (feat_loss, (r_loss, ce)), feat_grads = jax.value_and_grad(
+            (feat_loss, (ce, r_loss)), feat_grads = jax.value_and_grad(
                 feature_loss_fn, has_aux=True)(feat_step_params)
-            feature_update, feature_opt_state = self.optim.update(feat_grads, feature_opt_state)
+            feature_update, feature_opt_state = self.feature_optim.update(feat_grads, feature_opt_state)
             feat_step_params = optax.apply_updates(feat_step_params, feature_update)
             
             feature_params = feat_step_params['feature']

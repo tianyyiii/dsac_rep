@@ -118,12 +118,11 @@ class DiffURep(Algorithm):
                 return q
 
             next_action = self.agent.get_action(next_eval_key, (policy_params, log_alpha, q1_params, q2_params, phi_params), next_obs)
-            next_action = jax.lax.stop_gradient(next_action)
             feature_q = self.agent.phi(phi_params, next_obs, next_action, 0)
             q1_target = self.agent.q(target_q1_params, feature_q)
             q2_target = self.agent.q(target_q2_params, feature_q)
             q_target = jnp.minimum(q1_target, q2_target)  # - jnp.exp(log_alpha) * next_logp
-            q_backup = reward + (1 - done) * self.gamma * q_target
+            q_backup = jax.lax.stop_gradient(reward + (1 - done) * self.gamma * q_target)
 
             def q_loss_fn(q_params: hk.Params, phi_params: hk.Params) -> jax.Array:
                 feature_ql = self.agent.phi(phi_params, obs, action, 0)
@@ -171,18 +170,19 @@ class DiffURep(Algorithm):
                     return self.agent.policy(policy_params, feature_a)
                 
                 t = jax.random.randint(diffusion_time_key, (next_obs.shape[0],), 0, self.agent.num_timesteps)
-                noise, x_noisy, loss = self.agent.diffusion.weighted_p_loss(diffusion_noise_key, q_weights, denoiser, t,
-                                                            jax.lax.stop_gradient(next_action))
-                # B = self.agent.diffusion.beta_schedule()
-                # noise = B.sqrt_alphas_cumprod[t][:, None] / B.sqrt_one_minus_alphas_cumprod[t][:, None] * noise
+                noise, x_noisy, loss = self.agent.diffusion.weighted_p_loss(diffusion_noise_key, 
+                                                                            q_weights, 
+                                                                            denoiser, t, 
+                                                                            jax.lax.stop_gradient(next_action))
 
                 phi_output, _ = get_feature_a(phi_params, x_noisy, obs, t)
                 phi_output = jnp.transpose(phi_output, (0, 2, 1))
-                mu_output = self.agent.mu(mu_params, next_obs)
-                mul = jnp.matmul(phi_output, mu_output[..., None])
-                mul = mul.squeeze(-1)
-                rep_loss = optax.squared_error(mul, noise).mean()
-                loss = loss + self.rep_weight * rep_loss
+                if self.rep_weight > 0.0:
+                    mu_output = self.agent.mu(mu_params, next_obs)
+                    mul = jnp.matmul(phi_output, mu_output[..., None])
+                    mul = mul.squeeze(-1)
+                    rep_loss = optax.squared_error(mul, noise).mean()
+                    loss += self.rep_weight * rep_loss
 
                 return loss, (rep_loss, q_weights, scaled_q, q_mean, q_std)
 
@@ -224,8 +224,8 @@ class DiffURep(Algorithm):
                     target_params
                 )
 
-            phi_grads = jax.tree_util.tree_map(lambda a, b: a + b, phi_grads_p, phi_grads_q1)
-            phi_grads = jax.tree_util.tree_map(lambda a, c: a + c, phi_grads, phi_grads_q2)
+            phi_grads_q = jax.tree_util.tree_map(lambda a, b: a + b, phi_grads_q1, phi_grads_q2)
+            phi_grads = jax.tree_util.tree_map(lambda a, c: a + c, phi_grads_q, phi_grads_p)
 
             q1_params, q1_opt_state = param_update(self.q_optim, q1_params, q1_grads, q1_opt_state)
             q2_params, q2_opt_state = param_update(self.q_optim, q2_params, q2_grads, q2_opt_state)
