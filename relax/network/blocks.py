@@ -197,8 +197,8 @@ class DACERPolicyNet(hk.Module):
         return mlp(self.hidden_sizes, act_dim, self.activation, self.output_activation)(input)
     
 '''
-Policy class for diffusion rep policy
-'''    
+-----------------------------For diffrep representation-----------------------------------------------------------
+'''
 @dataclass
 @fix_repr
 class DiffusionRepPolicyNet(hk.Module):
@@ -225,11 +225,23 @@ class DiffusionRepPolicyNet(hk.Module):
         elif len(phi_output.shape) == 1:
             phi_output = phi_output.reshape((act_dim, self.embedding_dim))
         return phi_output, output
+
+@dataclass
+@fix_repr
+class DiffusionRepQNet(hk.Module):
+    hidden_sizes: Sequence[int]
+    activation: Activation
+    output_activation: Activation = Identity
+    embedding_dim: int = 256
+    name: str = None
+
+    def __call__(self, obs: jax.Array, act: jax.Array) -> jax.Array:
+        input = jnp.concatenate((obs, act), axis=-1)
+        phi_output = mlp(self.hidden_sizes, self.embedding_dim, self.activation, self.output_activation)(input)
+        output = mlp((256,), 1, self.activation, self.output_activation, squeeze_output=True)(phi_output)
+        return phi_output, output
     
-    
-'''
-Mu network
-'''
+
 @dataclass
 @fix_repr
 class DiffusionRepMuNet(hk.Module):
@@ -242,6 +254,7 @@ class DiffusionRepMuNet(hk.Module):
     def __call__(self, next_obs: jax.Array) -> jax.Array:
         output = mlp(self.hidden_sizes, self.embedding_dim, self.activation, self.output_activation)(next_obs)
         return output
+    
     
 '''
 -----------------------------For unified representation-----------------------------------------------------------

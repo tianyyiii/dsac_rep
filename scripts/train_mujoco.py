@@ -13,7 +13,7 @@ from relax.algorithm.qsm import QSM
 from relax.algorithm.dipo import DIPO
 from relax.algorithm.qvpo import QVPO
 from relax.algorithm.sdac import SDAC
-from relax.algorithm.diffrep import DiffRep
+from relax.algorithm.diffrep_v2 import DiffRep
 from relax.algorithm.diffurep import DiffURep
 from relax.algorithm.diffrep_image import DiffRepImage
 from relax.buffer import TreeBuffer
@@ -22,7 +22,7 @@ from relax.network.dacer import create_dacer_net
 from relax.network.qsm import create_qsm_net
 from relax.network.dipo import create_dipo_net
 from relax.network.sdac import create_sdac_net
-from relax.network.diffrep import create_diffrep_net
+from relax.network.diffrep_v2 import create_diffrep_net
 from relax.network.diffurep import create_diffurep_net
 from relax.network.diffrep_image import create_diffrep_image_net
 from relax.network.qvpo import create_qvpo_net
@@ -57,7 +57,8 @@ if __name__ == "__main__":
     parser.add_argument("--noise_scale", type=float, default=0.1)
     parser.add_argument("--target_entropy_scale", type=float, default=1.5)
     parser.add_argument("--debug", action='store_true', default=False)
-    parser.add_argument("--rep_weight", type=float, default=0.0)
+    parser.add_argument("--rep_weight_policy", type=float, default=0.0)
+    parser.add_argument("--rep_weight_q", type=float, default=0.0)
     parser.add_argument("--pred_horizon", type=int, default=1)
     parser.add_argument("--act_horizon", type=int, default=1)
     parser.add_argument("--batch_size", type=int, default=256)
@@ -118,7 +119,7 @@ if __name__ == "__main__":
         algorithm = DiffRep(agent, params, lr=args.lr, alpha_lr=args.alpha_lr, 
                            delay_alpha_update=args.delay_alpha_update,
                              lr_schedule_end=args.lr_schedule_end,
-                             use_ema=args.use_ema_policy, rep_weight=args.rep_weight, pred_horizon=args.pred_horizon)
+                             use_ema=args.use_ema_policy, rep_weight_policy=args.rep_weight_policy, rep_weight_q=args.rep_weight_q, pred_horizon=args.pred_horizon)
         
     elif args.alg == 'diffurep':
         def mish(x: jax.Array):

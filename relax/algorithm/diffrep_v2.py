@@ -1,14 +1,14 @@
 from typing import NamedTuple, Tuple
 
 import jax, jax.numpy as jnp
+import jax.nn as jnn
 import numpy as np
 import optax
 import haiku as hk
 import pickle
 
 from relax.algorithm.base import Algorithm
-from relax.network.dacer import DACERNet, DACERParams
-from relax.network.diffrep import DiffRepNet, DiffRepParams
+from relax.network.diffrep_v2 import DiffRepNet, DiffRepParams
 from relax.utils.experience import Experience
 from relax.utils.typing import Metric
 
@@ -46,8 +46,8 @@ class DiffRep(Algorithm):
         reward_scale: float = 0.2,
         num_samples: int = 200,
         use_ema: bool = True,
-        rep_weight: float = 1.0,
-        rep_weight_q: float = 0.0, 
+        rep_weight_policy: float = 1.0,
+        rep_weight_q: float = 1.0,
         pred_horizon: int = 1,
     ):
         self.agent = agent
@@ -90,7 +90,8 @@ class DiffRep(Algorithm):
             running_std=jnp.float32(1.0)
         )
         self.use_ema = use_ema
-        self.rep_weight = rep_weight
+        self.rep_weight_policy = rep_weight_policy
+        self.rep_weight_q = rep_weight_q
         self.pred_horizon = pred_horizon
 
         @jax.jit
@@ -108,35 +109,39 @@ class DiffRep(Algorithm):
 
             reward *= self.reward_scale
 
+            # To do: one phi_q network
             def get_min_q(s, a):
-                q1 = self.agent.q(q1_params, s, a)
-                q2 = self.agent.q(q2_params, s, a)
-                q = jnp.minimum(q1, q2)
-                return q
-
-            def get_min_target_q(s, a):
-                q1 = self.agent.q(target_q1_params, s, a)
-                q2 = self.agent.q(target_q2_params, s, a)
+                q1 = self.agent.q(q1_params, s, a)[1]
+                q2 = self.agent.q(q2_params, s, a)[1]
                 q = jnp.minimum(q1, q2)
                 return q
 
             next_action = self.agent.get_action(next_eval_key, (policy_params, log_alpha, q1_params, q2_params), next_obs)
-            q1_target = self.agent.q(target_q1_params, next_obs, next_action)
-            q2_target = self.agent.q(target_q2_params, next_obs, next_action)
+            q1_target = self.agent.q(target_q1_params, next_obs, next_action)[1]
+            q2_target = self.agent.q(target_q2_params, next_obs, next_action)[1]
             q_target = jnp.minimum(q1_target, q2_target)  # - jnp.exp(log_alpha) * next_logp
             q_backup = reward + (1 - done) * (self.gamma ** self.pred_horizon) * q_target
 
-            def q_loss_fn(q_params: hk.Params) -> jax.Array:
-                q = self.agent.q(q_params, obs, action)
+            def q_loss_fn(q_params: hk.Params, mu_params: hk.Params) -> jax.Array:
+                phi_q, q = self.agent.q(q_params, obs, action)
+                mu_q = self.agent.mu(mu_params, next_obs)
                 q_loss = jnp.mean((q - q_backup) ** 2)
-                return q_loss, q
 
-            (q1_loss, q1), q1_grads = jax.value_and_grad(q_loss_fn, has_aux=True)(q1_params)
-            (q2_loss, q2), q2_grads = jax.value_and_grad(q_loss_fn, has_aux=True)(q2_params)
+                contrastive = jnp.sum(phi_q[:, None, :] * mu_q[None, :, :], axis=-1)
+                labels = jnp.eye(phi_q.shape[0])
+                contrastive_loss = -jnp.mean(jnp.sum(labels * jnn.log_softmax(contrastive), axis=1))
+
+                return q_loss + self.rep_weight_q * contrastive_loss, q
+
+            (q1_loss, q1), (q1_grads, mu_grads_q1) = jax.value_and_grad(q_loss_fn, argnums=(0, 1), has_aux=True)(q1_params, mu_params)
+            (q2_loss, q2), (q2_grads, mu_grads_q2) = jax.value_and_grad(q_loss_fn, argnums=(0, 1), has_aux=True)(q2_params, mu_params)
             q1_update, q1_opt_state = self.optim.update(q1_grads, q1_opt_state)
             q2_update, q2_opt_state = self.optim.update(q2_grads, q2_opt_state)
             q1_params = optax.apply_updates(q1_params, q1_update)
             q2_params = optax.apply_updates(q2_params, q2_update)
+            mu_grads_q = jax.tree_util.tree_map(lambda a, b: a + b, mu_grads_q1, mu_grads_q2)
+            mu_update_q, mu_opt_state = self.mu_optim.update(mu_grads_q, mu_opt_state)
+            mu_params = optax.apply_updates(mu_params, mu_update_q)
 
 
             def policy_loss_fn(policy_params, mu_params) -> jax.Array:
@@ -156,7 +161,7 @@ class DiffRep(Algorithm):
                 mul = jnp.matmul(phi_output, mu_output[..., None])
                 mul = mul.squeeze(-1)
                 rep_loss = optax.squared_error(mul, noise).mean()
-                loss = loss + self.rep_weight * rep_loss
+                loss = loss + self.rep_weight_policy * rep_loss
 
                 return loss, (q_weights, scaled_q, q_mean, q_std)
 
