@@ -42,7 +42,7 @@ class SDACRepNet(SDACNet):
     theta: Callable[[hk.Params, jax.Array], jax.Array]
 
     def get_action(self, key: jax.Array, policy_params: hk.Params, obs: jax.Array) -> jax.Array:
-        policy_params, log_alpha, q1_params, q2_params, feat_params, _, _ = policy_params
+        policy_params, log_alpha, q1_params, q2_params, feat_params = policy_params[:5]
 
         def model_fn(t, x):
             return self.policy(policy_params, obs, x, t)
