@@ -13,7 +13,7 @@ from relax.algorithm.qsm import QSM
 from relax.algorithm.dipo import DIPO
 from relax.algorithm.qvpo import QVPO
 from relax.algorithm.sdac import SDAC
-from relax.algorithm.diffrep_v2 import DiffRep
+from relax.algorithm.diffrep import DiffRep
 from relax.algorithm.diffurep import DiffURep
 from relax.algorithm.diffrep_image import DiffRepImage
 from relax.buffer import TreeBuffer
@@ -22,7 +22,7 @@ from relax.network.dacer import create_dacer_net
 from relax.network.qsm import create_qsm_net
 from relax.network.dipo import create_dipo_net
 from relax.network.sdac import create_sdac_net
-from relax.network.diffrep_v2 import create_diffrep_net
+from relax.network.diffrep import create_diffrep_net
 from relax.network.diffurep import create_diffurep_net
 from relax.network.diffrep_image import create_diffrep_image_net
 from relax.network.qvpo import create_qvpo_net

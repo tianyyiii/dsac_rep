@@ -46,7 +46,7 @@ class DiffRep(Algorithm):
         reward_scale: float = 0.2,
         num_samples: int = 200,
         use_ema: bool = True,
-        rep_weight: float = 1.0,
+        rep_weight_policy: float = 1.0,
         rep_weight_q: float = 0.0, 
         pred_horizon: int = 1,
     ):
@@ -90,7 +90,7 @@ class DiffRep(Algorithm):
             running_std=jnp.float32(1.0)
         )
         self.use_ema = use_ema
-        self.rep_weight = rep_weight
+        self.rep_weight = rep_weight_policy
         self.pred_horizon = pred_horizon
 
         @jax.jit
