@@ -51,18 +51,21 @@ if __name__ == "__main__":
     parser.add_argument("--num_particles", type=int, default=32)
     parser.add_argument("--noise_scale", type=float, default=0.1)
     parser.add_argument("--batch_size", type=int, default=256)
-    # for rep
-    parser.add_argument("--feat_dim", type=int, default=2048) 
-    parser.add_argument("--reward_loss_wgt", type=float, default=0.5)
+    parser.add_argument("--extra_feature_steps", type=int, default=0)
 
+    # for rep
+    parser.add_argument("--feat_dim", type=int, default=1024) 
+    parser.add_argument("--reward_loss_wgt", type=float, default=0.5)
 
     parser.add_argument("--diffusion_steps", type=int, default=20)
     parser.add_argument("--start_step", type=int,
                         default=int(3e4))  # other envs 3e4
     parser.add_argument("--total_step", type=int, default=int(1e6))  # 1e6
     parser.add_argument("--update_per_iteration", type=int, default=1)
+    
     parser.add_argument("--lr", type=float, default=3e-4)
     parser.add_argument("--lr_schedule_end", type=float, default=3e-5)
+    parser.add_argument("--lr_feat", type=float, default=1e-4)
     parser.add_argument("--alpha_lr", type=float, default=7e-3)
     parser.add_argument("--delay_alpha_update", type=float, default=250)
     parser.add_argument("--seed", type=int, default=100)
@@ -110,9 +113,9 @@ if __name__ == "__main__":
                                         num_particles=args.num_particles,
                                         noise_scale=args.noise_scale,
                                         target_entropy_scale=args.target_entropy_scale)
-    algorithm = SDACRep(agent, params, lr=args.lr, alpha_lr=args.alpha_lr,
-                        delay_alpha_update=args.delay_alpha_update,
+    algorithm = SDACRep(agent, params, lr=args.lr, lr_feat=args.lr_feat, alpha_lr=args.alpha_lr,
                         lr_schedule_end=args.lr_schedule_end,
+                        delay_alpha_update=args.delay_alpha_update,
                         use_ema=args.use_ema_policy, use_target_feature=True, reward_loss_wgt=args.reward_loss_wgt)
 
     exp_dir = PROJECT_ROOT / "logs" / args.env / \
@@ -132,6 +135,7 @@ if __name__ == "__main__":
         total_step=args.total_step,
         sample_per_iteration=1,
         update_per_iteration=args.update_per_iteration,
+        update_aux_per_iteration=args.extra_feature_steps,
         evaluate_env=eval_env,
         save_policy_every=int(args.total_step / 40),
         warmup_with=args.warmup_with,

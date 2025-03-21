@@ -12,12 +12,17 @@ from relax.utils.typing import Metric
 
 class Algorithm:
     # NOTE: a not elegant blanket implementation of the algorithm interface
-    def _implement_common_behavior(self, stateless_update, stateless_get_action, stateless_get_deterministic_action, stateless_get_value=None):
+    def _implement_common_behavior(self, stateless_update, stateless_get_action, stateless_get_deterministic_action, stateless_get_value=None, update_aux=None):
         self._update = jax.jit(stateless_update)
         self._get_action = jax.jit(stateless_get_action)
         self._get_deterministic_action = jax.jit(stateless_get_deterministic_action)
         if stateless_get_value is not None:
             self._get_value = jax.jit(stateless_get_value)
+        self._update_aux = None if update_aux is None else jax.jit(update_aux)
+
+    def update_aux(self, key: jax.Array, data: Experience) -> Metric:
+        self.state, info = self._update_aux(key, self.state, data)
+        return {k: float(v) for k, v in info.items()}
 
     def update(self, key: jax.Array, data: Experience) -> Metric:
         self.state, info = self._update(key, self.state, data)
@@ -73,5 +78,7 @@ class Algorithm:
         obs = data.obs[0]
         policy_params = self.get_policy_params()
         self._update(key, self.state, data)
+        if self._update_aux is not None:
+            self._update_aux(key, self.state, data)
         self._get_action(key, policy_params, obs)
         self._get_deterministic_action(policy_params, obs)

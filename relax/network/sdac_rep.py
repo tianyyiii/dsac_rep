@@ -108,8 +108,10 @@ def create_sdac_rep_net(
     mu = hk.without_apply_rng(hk.transform(lambda obs: mlp(
         feature_hidden_sizes, feature_dim, activation, output_activation=jax.nn.tanh)(obs)))
     
-    theta = hk.without_apply_rng(hk.transform(lambda feature: hk.Linear(1)(feature).squeeze(-1)))
-
+    #theta = hk.without_apply_rng(hk.transform(lambda feature: hk.Linear(1)(feature).squeeze(-1)))
+    theta = hk.without_apply_rng(hk.transform(lambda feature: mlp(
+        [feature_dim // 2], 1, activation, output_activation=Identity, squeeze_output=True)(feature)))
+    
     @jax.jit
     def init(key, obs, act, feat):
         q1_key, q2_key, policy_key, feature_key, mu_key, theta_key = jax.random.split(key, 6)

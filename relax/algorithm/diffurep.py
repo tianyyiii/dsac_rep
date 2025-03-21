@@ -17,7 +17,6 @@ class DiffURepOptStates(NamedTuple):
     q2: optax.OptState
     policy: optax.OptState
     phi: optax.OptState
-    mu: optax.OptState
     log_alpha: optax.OptState
 
 
@@ -61,15 +60,8 @@ class DiffURep(Algorithm):
             transition_steps=int(5e4),
             transition_begin=int(2.5e4),
         )
-        lr_schedule_mu = optax.schedules.linear_schedule(
-            init_value=lr / 100,
-            end_value=lr_schedule_end / 100,
-            transition_steps=int(5e4),
-            transition_begin=int(2.5e4),
-        )
         self.q_optim = optax.adam(lr)
         self.phi_optim = optax.adam(learning_rate=lr_schedule)
-        self.mu_optim = optax.adam(learning_rate=lr_schedule_mu)
         self.policy_optim = optax.adam(learning_rate=lr_schedule)
         self.alpha_optim = optax.adam(alpha_lr)
         self.entropy = 0.0
@@ -79,9 +71,8 @@ class DiffURep(Algorithm):
             opt_state=DiffURepOptStates(
                 q1=self.q_optim.init(params.q1),
                 q2=self.q_optim.init(params.q2),
-                policy=self.policy_optim.init(params.policy),
+                policy=self.policy_optim.init({'policy': params.policy, 'mu': params.mu}),
                 phi=self.phi_optim.init(params.phi),
-                mu=self.mu_optim.init(params.mu),
                 log_alpha=self.alpha_optim.init(params.log_alpha),
             ),
             step=jnp.int32(0),
@@ -98,12 +89,11 @@ class DiffURep(Algorithm):
         ) -> Tuple[DiffURepOptStates, Metric]:
             obs, action, reward, next_obs, done = data.obs, data.action, data.reward, data.next_obs, data.done
             q1_params, q2_params, target_q1_params, target_q2_params, policy_params, target_policy_params, phi_params, mu_params, log_alpha = state.params
-            q1_opt_state, q2_opt_state, policy_opt_state, phi_opt_state, mu_opt_state, log_alpha_opt_state = state.opt_state
+            q1_opt_state, q2_opt_state, policy_opt_state, phi_opt_state, log_alpha_opt_state = state.opt_state
             step = state.step
             running_mean = state.running_mean
             running_std = state.running_std
-            next_eval_key, new_eval_key, new_q1_eval_key, new_q2_eval_key, log_alpha_key, diffusion_time_key, diffusion_noise_key = jax.random.split(
-                key, 7)
+            next_eval_key, diffusion_time_key, diffusion_noise_key = jax.random.split(key, 3)
 
             reward *= self.reward_scale
 
@@ -116,6 +106,21 @@ class DiffURep(Algorithm):
                 q2 = self.agent.q(q2_params, feature)
                 q = jnp.minimum(q1, q2)
                 return q
+            
+            # update networks
+            def param_update(optim, params, grads, opt_state):
+                update, new_opt_state = optim.update(grads, opt_state)
+                new_params = optax.apply_updates(params, update)
+                return new_params, new_opt_state
+
+            def delay_target_update(params, target_params, tau):
+                return jax.lax.cond(
+                    step % self.delay_update == 0,
+                    lambda target_params: optax.incremental_update(
+                        params, target_params, tau),
+                    lambda target_params: target_params,
+                    target_params
+                )
 
             next_action = self.agent.get_action(next_eval_key, (policy_params, log_alpha, q1_params, q2_params, phi_params), next_obs)
             feature_q = self.agent.phi(phi_params, next_obs, next_action, 0)
@@ -132,11 +137,11 @@ class DiffURep(Algorithm):
 
             (q1_loss, q1), (q1_grads, phi_grads_q1) = jax.value_and_grad(q_loss_fn, argnums=(0, 1), has_aux=True)(q1_params, phi_params)
             (q2_loss, q2), (q2_grads, phi_grads_q2) = jax.value_and_grad(q_loss_fn, argnums=(0, 1), has_aux=True)(q2_params, phi_params)
-            # q1_update, q1_opt_state = self.optim.update(q1_grads, q1_opt_state)
-            # q2_update, q2_opt_state = self.optim.update(q2_grads, q2_opt_state)
-            # q1_params = optax.apply_updates(q1_params, q1_update)
-            # q2_params = optax.apply_updates(q2_params, q2_update)
 
+            q1_params, q1_opt_state = param_update(self.q_optim, q1_params, q1_grads, q1_opt_state)
+            q2_params, q2_opt_state = param_update(self.q_optim, q2_params, q2_grads, q2_opt_state)
+            target_q1_params = delay_target_update(q1_params, target_q1_params, self.tau)
+            target_q2_params = delay_target_update(q2_params, target_q2_params, self.tau)
 
             def get_feature_a(phi_params, x, obs, t):
                 def single_sample_jacobian(x_sample, obs_sample, t_sample):
@@ -154,9 +159,8 @@ class DiffURep(Algorithm):
             '''
             Actor and feature learning stage
             '''
-
-
-            def policy_loss_fn(policy_params, phi_params, mu_params) -> jax.Array:
+            def policy_loss_fn(policy_mu_params, phi_params) -> jax.Array:
+                policy_params, mu_params = policy_mu_params['policy'], policy_mu_params['mu']
                 feature_pl = self.agent.phi(phi_params, next_obs, next_action, 0)
                 q_min = get_min_q(feature_pl)
                 q_mean, q_std = q_min.mean(), q_min.std()
@@ -186,19 +190,16 @@ class DiffURep(Algorithm):
 
                 return loss, (rep_loss, q_weights, scaled_q, q_mean, q_std)
 
-            (policy_loss, (rep_loss, q_weights, scaled_q, q_mean, q_std)), (policy_grads, phi_grads_p, mu_grads) = jax.value_and_grad(policy_loss_fn, argnums=(0, 1, 2), has_aux=True)(policy_params, phi_params, mu_params)
+            policy_mu_params = {'policy': policy_params, 'mu': mu_params}
+            (policy_loss, (rep_loss, q_weights, scaled_q, q_mean, q_std)), (policy_mu_grads, phi_grads_p) = jax.value_and_grad(policy_loss_fn, argnums=(0, 1), 
+                                                                                                                               has_aux=True)(policy_mu_params, phi_params)
 
             # update alpha
             def log_alpha_loss_fn(log_alpha: jax.Array) -> jax.Array:
                 approx_entropy = 0.5 * self.agent.act_dim * jnp.log( 2 * jnp.pi * jnp.exp(1) * (0.1 * jnp.exp(log_alpha)) ** 2)
                 log_alpha_loss = -1 * log_alpha * (-1 * jax.lax.stop_gradient(approx_entropy) + self.agent.target_entropy)
                 return log_alpha_loss
-
-            # update networks
-            def param_update(optim, params, grads, opt_state):
-                update, new_opt_state = optim.update(grads, opt_state)
-                new_params = optax.apply_updates(params, update)
-                return new_params, new_opt_state
+            
 
             def delay_param_update(optim, params, grads, opt_state):
                 return jax.lax.cond(
@@ -215,27 +216,17 @@ class DiffURep(Algorithm):
                     lambda params, opt_state: (params, opt_state),
                     params, opt_state
                 )
+            
 
-            def delay_target_update(params, target_params, tau):
-                return jax.lax.cond(
-                    step % self.delay_update == 0,
-                    lambda target_params: optax.incremental_update(params, target_params, tau),
-                    lambda target_params: target_params,
-                    target_params
-                )
+            #phi_grads_q = jax.tree_util.tree_map(lambda a, b: a + b, phi_grads_q1, phi_grads_q2)
+            #phi_grads = jax.tree_util.tree_map(lambda a, c: a + c, phi_grads_q, phi_grads_p)
+            phi_grads = phi_grads_p
 
-            phi_grads_q = jax.tree_util.tree_map(lambda a, b: a + b, phi_grads_q1, phi_grads_q2)
-            phi_grads = jax.tree_util.tree_map(lambda a, c: a + c, phi_grads_q, phi_grads_p)
-
-            q1_params, q1_opt_state = param_update(self.q_optim, q1_params, q1_grads, q1_opt_state)
-            q2_params, q2_opt_state = param_update(self.q_optim, q2_params, q2_grads, q2_opt_state)
-            policy_params, policy_opt_state = delay_param_update(self.policy_optim, policy_params, policy_grads, policy_opt_state)
+            policy_mu_params, policy_opt_state = delay_param_update(self.policy_optim, policy_mu_params, policy_mu_grads, policy_opt_state)
+            policy_params, mu_params = policy_mu_params['policy'], policy_mu_params['mu']
             phi_params, phi_opt_state = param_update(self.phi_optim, phi_params, phi_grads, phi_opt_state)
-            mu_params, mu_opt_state = param_update(self.mu_optim, mu_params, mu_grads, mu_opt_state)
             log_alpha, log_alpha_opt_state = delay_alpha_param_update(self.alpha_optim, log_alpha, log_alpha_opt_state)
 
-            target_q1_params = delay_target_update(q1_params, target_q1_params, self.tau)
-            target_q2_params = delay_target_update(q2_params, target_q2_params, self.tau)
             target_policy_params = delay_target_update(policy_params, target_policy_params, self.tau)
 
             new_running_mean = running_mean + 0.001 * (q_mean - running_mean)
@@ -243,7 +234,7 @@ class DiffURep(Algorithm):
 
             state = DiffURepTrainState(
                 params=DiffURepParams(q1_params, q2_params, target_q1_params, target_q2_params, policy_params, target_policy_params, phi_params, mu_params, log_alpha),
-                opt_state=DiffURepOptStates(q1=q1_opt_state, q2=q2_opt_state, policy=policy_opt_state, phi=phi_opt_state, mu=mu_opt_state, log_alpha=log_alpha_opt_state),
+                opt_state=DiffURepOptStates(q1=q1_opt_state, q2=q2_opt_state, policy=policy_opt_state, phi=phi_opt_state, log_alpha=log_alpha_opt_state),
                 step=step + 1,
                 entropy=jnp.float32(0.0),
                 running_mean=new_running_mean,

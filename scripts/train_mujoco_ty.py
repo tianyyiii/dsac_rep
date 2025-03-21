@@ -40,17 +40,20 @@ if __name__ == "__main__":
     parser.add_argument("--env", type=str, default="Hopper-v4")
     parser.add_argument("--suffix", type=str, default="test_use_atp1")
     parser.add_argument("--num_vec_envs", type=int, default=5)
-    parser.add_argument("--hidden_num", type=int, default=3)
-    parser.add_argument("--hidden_dim", type=int, default=256)
+
+    parser.add_argument("--hidden_num", type=int, default=2)
+    parser.add_argument("--hidden_dim", type=int, default=512)
     parser.add_argument("--diffusion_steps", type=int, default=20)
-    parser.add_argument("--diffusion_hidden_num", type=int, default=3)
-    parser.add_argument("--diffusion_hidden_dim", type=int, default=256)
-    parser.add_argument("--visual_embedding_dim",
-                        type=tuple, default=(25, 25, 32))
+    parser.add_argument("--feat_hidden_num", type=int, default=2)
+    parser.add_argument("--feat_hidden_dim", type=int, default=512)
+    parser.add_argument("--feat_dim", type=int, default=1024)
+
+
     parser.add_argument("--start_step", type=int,
                         default=int(3e4))  # other envs 3e4
     parser.add_argument("--total_step", type=int, default=int(1e6))  # 1e6
     parser.add_argument("--update_per_iteration", type=int, default=1)
+
     parser.add_argument("--lr", type=float, default=3e-4)
     parser.add_argument("--lr_schedule_end", type=float, default=3e-5)
     parser.add_argument("--alpha_lr", type=float, default=7e-3)
@@ -60,7 +63,7 @@ if __name__ == "__main__":
     parser.add_argument("--noise_scale", type=float, default=0.1)
     parser.add_argument("--target_entropy_scale", type=float, default=1.5)
     parser.add_argument("--debug", action='store_true', default=False)
-    parser.add_argument("--rep_weight", type=float, default=0.0)
+    parser.add_argument("--rep_weight", type=float, default=0.1)
     parser.add_argument("--batch_size", type=int, default=256)
     parser.add_argument("--use_ema_policy", default=True, action="store_true")
     parser.add_argument("--use_wandb", default=False, action="store_true")
@@ -93,8 +96,7 @@ if __name__ == "__main__":
     eval_env = None
 
     hidden_sizes = [args.hidden_dim] * args.hidden_num
-    diffusion_hidden_sizes = [
-        args.diffusion_hidden_dim] * args.diffusion_hidden_num
+    feat_hidden_sizes = [args.feat_hidden_dim] * args.feat_hidden_num
 
     buffer = TreeBuffer.from_experience(
         obs_dim, act_dim, size=int(1e6), seed=buffer_seed)
@@ -103,7 +105,7 @@ if __name__ == "__main__":
 
     def mish(x: jax.Array):
             return x * jnp.tanh(jax.nn.softplus(x))
-    agent, params = create_diffurep_net(init_network_key, obs_dim, act_dim, hidden_sizes, diffusion_hidden_sizes, mish,
+    agent, params = create_diffurep_net(init_network_key, obs_dim, act_dim, args.feat_dim, hidden_sizes, feat_hidden_sizes, mish,
                                         num_timesteps=args.diffusion_steps,
                                         num_particles=args.num_particles,
                                         noise_scale=args.noise_scale,

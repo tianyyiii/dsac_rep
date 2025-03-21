@@ -32,6 +32,7 @@ class OffPolicyTrainer:
         total_step: int = int(1e6),
         sample_per_iteration: int = 1,
         update_per_iteration: int = 1,
+        update_aux_per_iteration: int = 0,
         evaluate_env: Optional[Env] = None,
         evaluate_every: int = 10000,
         evaluate_n_episode: int = 20,
@@ -52,6 +53,9 @@ class OffPolicyTrainer:
         self.total_step = total_step
         self.sample_per_iteration = sample_per_iteration
         self.update_per_iteration = update_per_iteration
+        self.update_aux_per_iteration = update_aux_per_iteration
+        if update_aux_per_iteration > 0:
+            assert hasattr(self.algorithm, "update_aux"), "update_aux_per_iteration > 0 but algorithm does not have update_aux method"
         self.log_path = log_path
         self.policy_pkl_template = policy_pkl_template
         self.evaluate_env = evaluate_env
@@ -171,21 +175,29 @@ class OffPolicyTrainer:
         if ul.update_step % self.update_log_n_step == 0:
             ul.log(self.add_scalar)
 
+    def update_aux(self, update_key: jax.Array):
+        data = self.buffer.sample(self.batch_size)
+        _ = self.algorithm.update_aux(update_key, data)
+
     def train(self, key: jax.Array):
         key, warmup_key = jax.random.split(key)
 
         obs, _ = self.env.reset()
         obs = self.warmup(warmup_key, obs)
 
-        iter_key_fn = create_iter_key_fn(key, self.sample_per_iteration, self.update_per_iteration)
+        iter_key_fn = create_iter_key_fn(
+            key, self.sample_per_iteration, self.update_per_iteration, update_aux_per_iteration=self.update_aux_per_iteration)
         sl, ul = self.sample_log, self.update_log
 
         self.progress.unpause()
         while sl.sample_step <= self.total_step:
-            sample_keys, update_keys = iter_key_fn(sl.sample_step)
+            sample_keys, update_keys, update_aux_keys = iter_key_fn(sl.sample_step)
 
             for i in range(self.sample_per_iteration):
                 obs = self.sample(sample_keys[i], obs)
+
+            for i in range(self.update_aux_per_iteration):
+                self.update_aux(update_aux_keys[i])
 
             for i in range(self.update_per_iteration):
                 self.update(update_keys[i])
@@ -225,10 +237,10 @@ class OffPolicyTrainer:
         self.evaluator.stdin.close()
         self.evaluator.wait()
 
-def create_iter_key_fn(key: jax.Array, sample_per_iteration: int, update_per_iteration: int) -> Callable[[int], Tuple[jax.Array, jax.Array]]:
+def create_iter_key_fn(key: jax.Array, sample_per_iteration: int, update_per_iteration: int, update_aux_per_iteration: int) -> Callable[[int], Tuple[jax.Array, jax.Array]]:
     def iter_key_fn(step: int):
         iter_key = jax.random.fold_in(key, step)
-        sample_key, update_key = jax.random.split(iter_key)
+        sample_key, update_key, update_aux_key = jax.random.split(iter_key, 3)
         if sample_per_iteration > 1:
             sample_key = jax.random.split(sample_key, sample_per_iteration)
         else:
@@ -237,7 +249,13 @@ def create_iter_key_fn(key: jax.Array, sample_per_iteration: int, update_per_ite
             update_key = jax.random.split(update_key, update_per_iteration)
         else:
             update_key = (update_key,)
-        return sample_key, update_key
+
+        if update_aux_per_iteration > 1:
+            update_aux_key = jax.random.split(
+                update_aux_key, update_aux_per_iteration)
+        else:
+            update_aux_key = (update_aux_key, )
+        return sample_key, update_key, update_aux_key
 
     iter_key_fn = jax.jit(iter_key_fn)
     iter_key_fn(0)  # Warm up

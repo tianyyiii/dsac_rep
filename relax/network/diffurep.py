@@ -87,8 +87,9 @@ def create_diffurep_net(
     key: jax.Array,
     obs_dim: int,
     act_dim: int,
+    feat_dim: int,
     hidden_sizes: Sequence[int],
-    diffusion_hidden_sizes: Sequence[int],
+    feat_hidden_sizes: Sequence[int],
     activation: Activation = jax.nn.relu,
     num_timesteps: int = 20,
     num_particles: int = 32,
@@ -96,11 +97,10 @@ def create_diffurep_net(
     target_entropy_scale = 0.9,
     ) -> Tuple[DiffURepNet, DiffURepParams]:
 
-    embedding_dim = 256
-    q = hk.without_apply_rng(hk.transform(lambda feature: URepQNet([256, 256], activation)(feature)))
-    policy = hk.without_apply_rng(hk.transform(lambda feature: URepPolicyNet([256, 256], activation, act_dim)(feature)))
-    phi = hk.without_apply_rng(hk.transform(lambda obs, act, t: URepPhiNet(hidden_sizes, activation, embedding_dim=embedding_dim)(obs, act, t)))
-    mu = hk.without_apply_rng(hk.transform(lambda next_obs: URepMuNet(hidden_sizes, activation, embedding_dim=embedding_dim)(next_obs)))
+    q = hk.without_apply_rng(hk.transform(lambda feature: URepQNet(hidden_sizes, activation)(feature)))
+    policy = hk.without_apply_rng(hk.transform(lambda feature: URepPolicyNet(hidden_sizes, activation, act_dim)(feature)))
+    phi = hk.without_apply_rng(hk.transform(lambda obs, act, t: URepPhiNet(feat_hidden_sizes, activation, embedding_dim=feat_dim)(obs, act, t)))
+    mu = hk.without_apply_rng(hk.transform(lambda next_obs: URepMuNet(feat_hidden_sizes, activation, embedding_dim=feat_dim)(next_obs)))
 
     @jax.jit
     def init(key, obs, act, feature, feature_a):
@@ -118,8 +118,8 @@ def create_diffurep_net(
 
     sample_obs = jnp.zeros((1, obs_dim))
     sample_act = jnp.zeros((1, act_dim))
-    sample_feature = jnp.zeros((1, embedding_dim))
-    sample_feature_a = jnp.zeros((1, embedding_dim * act_dim))
+    sample_feature = jnp.zeros((1, feat_dim))
+    sample_feature_a = jnp.zeros((1, feat_dim * act_dim))
     params = init(key, sample_obs, sample_act, sample_feature, sample_feature_a)
 
     net = DiffURepNet(q=q.apply, policy=policy.apply, phi=phi.apply, mu=mu.apply, num_timesteps=num_timesteps, act_dim=act_dim, 
