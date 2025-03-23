@@ -61,6 +61,7 @@ if __name__ == "__main__":
     parser.add_argument("--rep_weight_q", type=float, default=0.0)
     parser.add_argument("--pred_horizon", type=int, default=1)
     parser.add_argument("--act_horizon", type=int, default=1)
+    parser.add_argument("--feature_steps", type=int, default=1)
     parser.add_argument("--batch_size", type=int, default=256)
     parser.add_argument("--use_ema_policy", default=True, action="store_true")
     args = parser.parse_args()
@@ -132,7 +133,7 @@ if __name__ == "__main__":
         algorithm = DiffURep(agent, params, lr=args.lr, alpha_lr=args.alpha_lr, 
                            delay_alpha_update=args.delay_alpha_update,
                              lr_schedule_end=args.lr_schedule_end,
-                             use_ema=args.use_ema_policy, rep_weight=args.rep_weight, pred_horizon=args.pred_horizon)
+                             use_ema=args.use_ema_policy, rep_weight=args.rep_weight_policy, pred_horizon=args.pred_horizon, feature_steps=args.feature_steps)
         
     elif args.alg == 'diffrep_image':
         def mish(x: jax.Array):

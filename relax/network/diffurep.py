@@ -18,6 +18,7 @@ class DiffURepParams(NamedTuple):
     policy: hk.Params
     target_poicy: hk.Params
     phi: hk.Params
+    target_phi: hk.Params
     mu: hk.Params
     log_alpha: jax.Array
 
@@ -105,16 +106,17 @@ def create_diffurep_net(
     @jax.jit
     def init(key, obs, act, feature, feature_a):
         q1_key, q2_key, policy_key, phi_key, mu_key = jax.random.split(key, 5)
-        phi_params = phi.init(phi_key, obs, act, 0)
         q1_params = q.init(q1_key, feature)
         q2_params = q.init(q2_key, feature)
         target_q1_params = q1_params
         target_q2_params = q2_params
+        phi_params = phi.init(phi_key, obs, act, 0)
+        target_phi_params = phi_params
         policy_params = policy.init(policy_key, feature_a)
         target_policy_params = policy_params
         mu_params = mu.init(mu_key, obs)
         log_alpha = jnp.array(math.log(5), dtype=jnp.float32) # math.log(3) or math.log(5) choose one
-        return DiffURepParams(q1_params, q2_params, target_q1_params, target_q2_params, policy_params, target_policy_params, phi_params, mu_params, log_alpha)
+        return DiffURepParams(q1_params, q2_params, target_q1_params, target_q2_params, policy_params, target_policy_params, phi_params, target_phi_params, mu_params, log_alpha)
 
     sample_obs = jnp.zeros((1, obs_dim))
     sample_act = jnp.zeros((1, act_dim))
