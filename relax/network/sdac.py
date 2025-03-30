@@ -120,5 +120,5 @@ def create_sdac_net(
 
     net = SDACNet(q=q.apply, policy=policy.apply, num_timesteps=num_timesteps, act_dim=act_dim, 
                     target_entropy=-act_dim*target_entropy_scale, num_particles=num_particles, noise_scale=noise_scale,
-                    noise_schedule='linear')
+                    noise_schedule='cosine')
     return net, params

@@ -124,5 +124,5 @@ def create_diffurep_net(
 
     net = DiffURepNet(q=q.apply, policy=policy.apply, phi=phi.apply, mu=mu.apply, num_timesteps=num_timesteps, act_dim=act_dim, 
                     target_entropy=-act_dim*target_entropy_scale, num_particles=num_particles, noise_scale=noise_scale,
-                    noise_schedule='linear')
+                    noise_schedule='cosine')
     return net, params

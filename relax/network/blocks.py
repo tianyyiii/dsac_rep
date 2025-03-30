@@ -47,7 +47,6 @@ class FeatureNet(hk.Module):
     output_activation: Activation = Identity
     name: str = None
 
-    # TODO: Check if params for layer norm is correct
     def __call__(self, obs: jax.Array, act: jax.Array) -> jax.Array:
         input = jnp.concatenate((obs, act), axis=-1)
         out = mlp(self.hidden_sizes, self.feature_size, self.activation, self.output_activation)(input)

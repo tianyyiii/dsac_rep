@@ -131,5 +131,5 @@ def create_diffrep_image_net(
 
     net = DiffRepImageNet(q=q.apply, policy=policy.apply, mu=mu.apply, encoder_v=encoder_v.apply, num_timesteps=num_timesteps, act_dim=act_dim, 
                     target_entropy=-act_dim*target_entropy_scale, num_particles=num_particles, noise_scale=noise_scale,
-                    noise_schedule='linear')
+                    noise_schedule='cosine')
     return net, params

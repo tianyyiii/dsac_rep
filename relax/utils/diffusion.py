@@ -57,8 +57,9 @@ class BetaScheduleCoefficients:
     def vp_beta_schedule(timesteps: int):
         t = np.arange(1, timesteps + 1)
         T = timesteps
-        b_max = 50.
-        b_min = 1e-6
+        # the following bmin and bmax is for the diffsr!
+        b_max = 0.02 
+        b_min = 1e-4
         alpha = np.exp(-b_min / T - 0.5 * (b_max - b_min) * (2 * t - 1) / T ** 2)
         betas = 1 - alpha
         return betas
@@ -85,11 +86,18 @@ class BetaScheduleCoefficients:
 @dataclass(frozen=True)
 class GaussianDiffusion:
     num_timesteps: int
-    noise_schedule: int
+    noise_schedule: str
 
     def beta_schedule(self):
         with jax.ensure_compile_time_eval():
-            betas = BetaScheduleCoefficients.cosine_beta_schedule(self.num_timesteps)
+            if self.noise_schedule == 'linear':
+                betas = BetaScheduleCoefficients.linear_beta_schedule(self.num_timesteps)
+            elif self.noise_schedule == 'vp':
+                betas = BetaScheduleCoefficients.vp_beta_schedule(self.num_timesteps)
+            elif self.noise_schedule == 'cosine':
+                betas = BetaScheduleCoefficients.cosine_beta_schedule(self.num_timesteps)
+            else: 
+                raise ValueError(f"Unknown noise schedule: {self.noise_schedule}")
             return BetaScheduleCoefficients.from_beta(betas)
 
     def p_mean_variance(self, t: int, x: jax.Array, noise_pred: jax.Array):

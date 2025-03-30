@@ -146,5 +146,5 @@ def create_diffrep_net(
 
     net = DiffRepNet(q=q.apply, policy=policy.apply, mu=mu.apply, num_timesteps=num_timesteps, act_dim=act_dim, 
                     target_entropy=-act_dim*target_entropy_scale, num_particles=num_particles, noise_scale=noise_scale,
-                     noise_schedule='linear', rep_embedding_dim=rep_embedding_dim, use_rff_critics=use_rff_critics)
+                     noise_schedule='cosine', rep_embedding_dim=rep_embedding_dim, use_rff_critics=use_rff_critics)
     return net, params

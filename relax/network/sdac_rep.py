@@ -139,5 +139,5 @@ def create_sdac_rep_net(
 
     net = SDACRepNet(q=q.apply, policy=policy.apply, num_timesteps=num_timesteps, act_dim=act_dim,
                     target_entropy=-act_dim*target_entropy_scale, num_particles=num_particles, noise_scale=noise_scale,
-                    noise_schedule='linear', feature=feature.apply, mu=mu.apply, theta=theta.apply)
+                    noise_schedule='cosine', feature=feature.apply, mu=mu.apply, theta=theta.apply)
     return net, params
