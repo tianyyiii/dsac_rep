@@ -374,7 +374,6 @@ def mlp(hidden_sizes: Sequence[int], output_size: int, activation: Activation, o
         layers.append(partial(jnp.squeeze, axis=-1))
     return hk.Sequential(layers)
 
-
 def scaled_sinusoidal_encoding(t: jax.Array, *, dim: int, theta: int = 10000, batch_shape = None) -> jax.Array:
     assert dim % 2 == 0
     if batch_shape is not None:

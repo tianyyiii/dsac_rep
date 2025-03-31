@@ -52,7 +52,7 @@ if __name__ == "__main__":
     parser.add_argument("--num_particles", type=int, default=32)
     parser.add_argument("--noise_scale", type=float, default=0.1)
     parser.add_argument("--batch_size", type=int, default=256)
-    parser.add_argument("--extra_feature_steps", type=int, default=0)
+    parser.add_argument("--extra_feature_steps", type=int, default=5)
 
     # for rep
     parser.add_argument("--feat_dim", type=int, default=512) 
@@ -63,7 +63,7 @@ if __name__ == "__main__":
     parser.add_argument("--start_step", type=int,
                         default=int(3e4))  # other envs 3e4
     parser.add_argument("--total_step", type=int, default=int(1e6))  # 1e6
-    parser.add_argument("--update_per_iteration", type=int, default=1)
+    parser.add_argument("--update_per_iteration", type=int, default=5)
     
     parser.add_argument("--lr", type=float, default=3e-4)
     parser.add_argument("--lr_schedule_end", type=float, default=3e-5)

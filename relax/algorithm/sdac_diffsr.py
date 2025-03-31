@@ -153,6 +153,13 @@ class SDACDiffSR(Algorithm):
             next_eval_key, diffusion_time_key, diffusion_noise_key, feat_key = jax.random.split(key, 4)
             reward *= self.reward_scale
 
+            # update networks
+            def param_update(optim, params, grads, opt_state):
+                update, new_opt_state = optim.update(grads, opt_state)
+                new_params = optax.apply_updates(params, update)
+                return new_params, new_opt_state
+
+
             # --------- feature step ----------
             ((feature_params, mu_params, theta_params, target_feat_params, target_mu_params, target_theta_params),
                 feature_opt_state, feat_metrics) = feature_step(state, data, feat_key)
@@ -186,10 +193,10 @@ class SDACDiffSR(Algorithm):
 
             (q1_loss, q1), q1_grads = jax.value_and_grad(q_loss_fn, has_aux=True)(q1_params)
             (q2_loss, q2), q2_grads = jax.value_and_grad(q_loss_fn, has_aux=True)(q2_params)
-            q1_update, q1_opt_state = self.optim.update(q1_grads, q1_opt_state)
-            q2_update, q2_opt_state = self.optim.update(q2_grads, q2_opt_state)
-            q1_params = optax.apply_updates(q1_params, q1_update)
-            q2_params = optax.apply_updates(q2_params, q2_update)
+            q1_params, q1_opt_state = param_update(
+                self.optim, q1_params, q1_grads, q1_opt_state)
+            q2_params, q2_opt_state = param_update(
+                self.optim, q2_params, q2_grads, q2_opt_state)
 
 
             def policy_loss_fn(policy_params) -> jax.Array:
@@ -237,8 +244,6 @@ class SDACDiffSR(Algorithm):
                     params, opt_state
                 )
 
-            q1_params, q1_opt_state = param_update(self.optim, q1_params, q1_grads, q1_opt_state)
-            q2_params, q2_opt_state = param_update(self.optim, q2_params, q2_grads, q2_opt_state)
             policy_params, policy_opt_state = delay_param_update(self.policy_optim, policy_params, policy_grads, policy_opt_state)
             log_alpha, log_alpha_opt_state = delay_alpha_param_update(self.alpha_optim, log_alpha, log_alpha_opt_state)
 

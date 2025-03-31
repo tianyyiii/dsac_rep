@@ -8,6 +8,7 @@ import yaml
 import jax, jax.numpy as jnp
 
 from relax.algorithm.sac import SAC
+from relax.algorithm.td3 import TD3
 from relax.algorithm.dacer import DACER
 from relax.algorithm.qsm import QSM
 from relax.algorithm.dipo import DIPO
@@ -18,6 +19,7 @@ from relax.algorithm.diffrep import DiffRep
 from relax.algorithm.diffrep_image import DiffRepImage
 from relax.buffer import TreeBuffer
 from relax.network.sac import create_sac_net
+from relax.network.td3 import create_td3_net
 from relax.network.dacer import create_dacer_net
 from relax.network.qsm import create_qsm_net
 from relax.network.dipo import create_dipo_net
@@ -35,17 +37,17 @@ from relax.utils.log_diff import log_git_details
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--alg", type=str, default="sdac")
-    parser.add_argument("--env", type=str, default="Hopper-v4")
+    parser.add_argument("--env", type=str, default="dsac/walker-run-v0")
     parser.add_argument("--suffix", type=str, default="test_use_atp1")
     parser.add_argument("--num_vec_envs", type=int, default=5)
 
     parser.add_argument("--hidden_num", type=int, default=3)
-    parser.add_argument("--hidden_dim", type=int, default=256)
+    parser.add_argument("--hidden_dim", type=int, default=512)
     parser.add_argument("--diffusion_hidden_num", type=int, default=3)
-    parser.add_argument("--diffusion_hidden_dim", type=int, default=256)
+    parser.add_argument("--diffusion_hidden_dim", type=int, default=512)
     parser.add_argument("--num_particles", type=int, default=32)
     parser.add_argument("--noise_scale", type=float, default=0.1)
-    parser.add_argument("--batch_size", type=int, default=256)
+    parser.add_argument("--batch_size", type=int, default=512)
 
     # for diffrep
     parser.add_argument("--rep_embedding_dim", type=int, default=256) # this is multiplied by nu!
@@ -55,7 +57,7 @@ if __name__ == "__main__":
     parser.add_argument("--diffusion_steps", type=int, default=20)
     parser.add_argument("--start_step", type=int, default=int(3e4)) # other envs 3e4
     parser.add_argument("--total_step", type=int, default=int(1e6)) #1e6
-    parser.add_argument("--update_per_iteration", type=int, default=1)
+    parser.add_argument("--update_per_iteration", type=int, default=5)
     parser.add_argument("--lr", type=float, default=3e-4)
     parser.add_argument("--lr_schedule_end", type=float, default=3e-5)
     parser.add_argument("--alpha_lr", type=float, default=7e-3)
@@ -140,8 +142,12 @@ if __name__ == "__main__":
         agent, params = create_qsm_net(init_network_key, obs_dim, act_dim, hidden_sizes, num_timesteps=20, num_particles=args.num_particles)
         algorithm = QSM(agent, params, lr=args.lr, lr_schedule_end=args.lr_schedule_end)
     elif args.alg == "sac":
-        agent, params = create_sac_net(init_network_key, obs_dim, act_dim, hidden_sizes, gelu)
-        algorithm = SAC(agent, params, lr=args.lr)
+        agent, params = create_sac_net(init_network_key, obs_dim, act_dim, hidden_sizes, jax.nn.leaky_relu)
+        algorithm = SAC(agent, params, lr=args.lr, alpha_lr=args.alpha_lr)
+    elif args.alg == "td3":
+        agent, params = create_td3_net(
+            init_network_key, obs_dim, act_dim, hidden_sizes, exploration_noise=0.2)
+        algorithm = TD3(agent, params, lr=args.lr)
     elif args.alg == "dacer":
         def mish(x: jax.Array):
             return x * jnp.tanh(jax.nn.softplus(x))
